@@ -17,14 +17,20 @@ router.post('/register', async (req, res) => {
     if (user) return res.status(400).json({ msg: 'User already exists' });
 
     const salt = await bcrypt.genSalt(10);
-    const hashed = await bcrypt.hash(password, salt);
+    const hashedPw = await bcrypt.hash(password, salt);
 
-    user = new User({ name, email, password: hashed, college: college || '' });
+    user = new User({ 
+      name, email, password: hashedPw, college: college || ''
+    });
+    
     await user.save();
 
     const token = generateToken(user);
     res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' });
-    res.json({ token, user: { _id: user._id, name: user.name, email: user.email, college: user.college, avatar: user.avatar, rating: user.rating } });
+    res.json({ 
+      token, 
+      user: { _id: user._id, name: user.name, email: user.email, college: user.college, avatar: user.avatar, rating: user.rating, isVerified: user.isVerified }
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server Error');

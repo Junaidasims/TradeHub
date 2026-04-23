@@ -284,4 +284,9 @@ async function seed() {
   }
 }
 
-seed();
+// Safeguard: To run seeding, use: node seed.js --force
+if (process.argv.includes('--force')) {
+  seed();
+} else {
+  console.log('⚠️  Seeding skipped to protect live data. Use --force to seed anyway.');
+}

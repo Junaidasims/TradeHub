@@ -6,6 +6,7 @@ import Navbar from '@/components/Navbar';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import ListingCard from '@/components/ListingCard';
 import { Search, Sliders, Star } from 'lucide-react';
 
 const CATEGORIES = ['Electronics', 'Books', 'Furniture', 'Clothing', 'Sports', 'Other'];
@@ -169,40 +170,21 @@ export default function ListingsPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                 {listings.map(item => (
-                  <Link key={item._id} href={`/listing/${item._id}`}
-                    className="card-neo bg-white overflow-hidden group hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
-                    <div className="h-48 bg-gray-100 overflow-hidden relative">
-                      <img src={item.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400'}
-                        alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      {item.status !== 'active' && (
-                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                          <span className="text-white font-black uppercase text-lg">{item.status}</span>
-                        </div>
-                      )}
-                      <div className="absolute top-3 left-3 flex gap-1">
-                        {item.type?.map(t => (
-                          <span key={t} className="px-2 py-0.5 bg-white/90 text-black text-[9px] font-black uppercase border border-black">{t}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="p-4">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 border border-black
-                          ${item.condition === 'New' ? 'bg-green-100' : item.condition === 'Like New' ? 'bg-blue-100' : 'bg-yellow-100'}`}>
-                          {item.condition}
-                        </span>
-                        <span className="text-[9px] text-gray-400 font-bold">👁 {item.views}</span>
-                      </div>
-                      <h3 className="font-black uppercase text-sm truncate mt-2">{item.title}</h3>
-                      <p className="text-accent-teal font-black text-lg mt-1">₹{item.price}</p>
-                      <div className="flex items-center gap-2 mt-2 text-[10px] font-bold text-gray-400">
-                        <span>{item.seller?.name || 'Unknown'}</span>
-                        {item.seller?.rating > 0 && (
-                          <span className="flex items-center gap-0.5"><Star size={10} className="text-yellow-500 fill-yellow-500" /> {item.seller.rating}</span>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
+                  <ListingCard 
+                    key={item._id}
+                    id={item._id}
+                    title={item.title}
+                    price={item.price}
+                    rentPrice={item.rentPrice}
+                    category={item.category}
+                    type={item.type}
+                    condition={item.condition}
+                    image={item.images?.[0]}
+                    status={item.status}
+                    rentedUntil={item.rentedUntil}
+                    views={item.views}
+                    seller={item.seller}
+                  />
                 ))}
               </div>
             )}

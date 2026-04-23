@@ -23,9 +23,10 @@ router.get('/', auth, async (req, res) => {
 // GET /:id/messages — paginated messages
 router.get('/:id/messages', auth, async (req, res) => {
   try {
-    const convo = await Conversation.findById(req.params.id);
-    if (!convo || !convo.participants.includes(req.user.id)) {
-      return res.status(401).json({ msg: 'Not authorized' });
+    // SECURITY: Only participants can fetch messages
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id });
+    if (!convo) {
+      return res.status(401).json({ msg: 'Not authorized or conversation not found' });
     }
 
     const page = parseInt(req.query.page) || 1;
@@ -34,6 +35,7 @@ router.get('/:id/messages', auth, async (req, res) => {
 
     const messages = await Message.find({ conversation: req.params.id })
       .populate('sender', 'name avatar')
+      .populate('itemContext', 'title')
       .sort({ createdAt: 1 })
       .skip(skip)
       .limit(limit);
@@ -46,28 +48,29 @@ router.get('/:id/messages', auth, async (req, res) => {
   }
 });
 
-// POST / — create or find existing conversation
+// POST / — create or find existing conversation (Unified per user pair)
 router.post('/', auth, async (req, res) => {
-  const { listingId, receiverId } = req.body;
+  const { receiverId } = req.body;
   try {
-    // Check for existing conversation between these users for this listing
+    if (!receiverId) return res.status(400).json({ msg: 'Receiver ID required' });
+    if (receiverId === req.user.id) return res.status(400).json({ msg: 'Cannot start conversation with yourself' });
+
+    // Find any conversation between these exactly two participants
     let conversation = await Conversation.findOne({
-      listing: listingId,
-      participants: { $all: [req.user.id, receiverId] }
-    }).populate('participants', 'name avatar').populate('listing', 'title images');
+      participants: { $all: [req.user.id, receiverId], $size: 2 }
+    }).populate('participants', 'name avatar');
 
     if (conversation) return res.json(conversation);
 
+    // Create new unified conversation
     conversation = new Conversation({
-      listing: listingId,
       participants: [req.user.id, receiverId],
       unreadCount: new Map([[req.user.id, 0], [receiverId, 0]])
     });
     await conversation.save();
 
     const populated = await Conversation.findById(conversation._id)
-      .populate('participants', 'name avatar')
-      .populate('listing', 'title images');
+      .populate('participants', 'name avatar');
 
     res.json(populated);
   } catch (err) {
@@ -79,9 +82,9 @@ router.post('/', auth, async (req, res) => {
 // PATCH /:id/read — mark all messages as read
 router.patch('/:id/read', auth, async (req, res) => {
   try {
-    const convo = await Conversation.findById(req.params.id);
-    if (!convo || !convo.participants.map(p => p.toString()).includes(req.user.id)) {
-      return res.status(401).json({ msg: 'Not authorized' });
+    const convo = await Conversation.findOne({ _id: req.params.id, participants: req.user.id });
+    if (!convo) {
+      return res.status(401).json({ msg: 'Not authorized or conversation not found' });
     }
 
     await Message.updateMany(

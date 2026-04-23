@@ -5,7 +5,7 @@ import Navbar from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
-import { Bell, Check, CheckCheck, MessageSquare, Repeat, Calendar, Star } from 'lucide-react';
+import { Bell, Check, CheckCheck, MessageSquare, Repeat, Calendar, Star, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 const ICONS = {
@@ -14,6 +14,7 @@ const ICONS = {
   trade_accepted: Check,
   trade_declined: Bell,
   rental_confirmed: Calendar,
+  rental_request: Calendar,
   review: Star
 };
 
@@ -22,6 +23,7 @@ export default function NotificationsPage() {
   const router = useRouter();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [processingId, setProcessingId] = useState(null);
 
   useEffect(() => {
     const fetchNotifs = async () => {
@@ -58,6 +60,33 @@ export default function NotificationsPage() {
     if (notif.link) router.push(notif.link);
   };
 
+  const handleApprove = async (e, notif) => {
+    e.stopPropagation();
+    if (!notif.data?.rentalId) return;
+    setProcessingId(notif._id);
+    try {
+      await api.patch(`/rentals/${notif.data.rentalId}/approve`);
+      // Mark notif as read and remove action buttons by changing type or state
+      await api.patch(`/notifications/${notif._id}/read`);
+      setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, read: true, type: 'rental_confirmed', message: 'Approved: ' + n.message } : n));
+      alert('Rental approved!');
+    } catch (err) { alert(err.response?.data?.msg || 'Approval failed'); }
+    finally { setProcessingId(null); }
+  };
+
+  const handleReject = async (e, notif) => {
+    e.stopPropagation();
+    if (!notif.data?.rentalId) return;
+    setProcessingId(notif._id);
+    try {
+      await api.patch(`/rentals/${notif.data.rentalId}/reject`);
+      await api.patch(`/notifications/${notif._id}/read`);
+      setNotifications(prev => prev.map(n => n._id === notif._id ? { ...n, read: true, type: 'trade_declined', message: 'Rejected: ' + n.message } : n));
+      alert('Rental rejected');
+    } catch (err) { alert(err.response?.data?.msg || 'Rejection failed'); }
+    finally { setProcessingId(null); }
+  };
+
   if (!user) return <main className="min-h-screen bg-cream"><Navbar /><div className="py-20 text-center font-black uppercase italic">Please log in</div></main>;
 
   return (
@@ -87,17 +116,40 @@ export default function NotificationsPage() {
           <div className="space-y-2">
             {notifications.map(n => {
               const Icon = ICONS[n.type] || Bell;
+              const isProcessing = processingId === n._id;
+              
               return (
-                <button key={n._id} onClick={() => handleClick(n)}
-                  className={`w-full text-left card-neo p-4 flex items-center gap-4 transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none
-                    ${n.read ? 'bg-white opacity-70' : 'bg-white border-l-4 border-l-accent-teal'}`}>
-                  <Icon size={18} className="text-accent-teal shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-sm font-bold">{n.message}</p>
-                    <p className="text-[9px] text-gray-400 font-bold mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+                <div key={n._id} onClick={() => handleClick(n)}
+                  className={`w-full text-left card-neo p-4 flex flex-col sm:flex-row sm:items-center gap-4 transition-all cursor-pointer
+                    ${n.read ? 'bg-white opacity-70' : 'bg-white border-l-4 border-l-accent-teal shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]'}`}>
+                  
+                  <div className="flex items-center gap-4 flex-1">
+                    <Icon size={18} className="text-accent-teal shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-bold">{n.message}</p>
+                      <p className="text-[9px] text-gray-400 font-bold mt-1 lowercase tracking-widest">{new Date(n.createdAt).toLocaleString()}</p>
+                    </div>
                   </div>
-                  {!n.read && <div className="w-2 h-2 bg-accent-teal rounded-full shrink-0" />}
-                </button>
+
+                  {n.type === 'rental_request' && !n.read && (
+                    <div className="flex gap-2 mt-2 sm:mt-0">
+                      <button 
+                        disabled={isProcessing}
+                        onClick={(e) => handleApprove(e, n)}
+                        className="btn-neo bg-green-500 text-white px-4 py-2 text-[10px] font-black uppercase flex items-center gap-1 hover:scale-105 active:scale-95 transition-all">
+                        <Check size={12} /> Yes
+                      </button>
+                      <button 
+                        disabled={isProcessing}
+                        onClick={(e) => handleReject(e, n)}
+                        className="btn-neo bg-red-500 text-white px-4 py-2 text-[10px] font-black uppercase flex items-center gap-1 hover:scale-105 active:scale-95 transition-all">
+                        <X size={12} /> No
+                      </button>
+                    </div>
+                  )}
+
+                  {!n.read && n.type !== 'rental_request' && <div className="hidden sm:block w-2 h-2 bg-accent-teal rounded-full shrink-0" />}
+                </div>
               );
             })}
           </div>

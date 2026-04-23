@@ -22,7 +22,7 @@ export default function DashboardPage() {
 
   // Edit modal
   const [editModal, setEditModal] = useState(null); // listing object or null
-  const [editForm, setEditForm] = useState({ price: '', description: '', condition: '' });
+  const [editForm, setEditForm] = useState({ price: '', rentPrice: '', description: '', condition: '' });
 
   useEffect(() => {
     if (!user) return;
@@ -65,13 +65,19 @@ export default function DashboardPage() {
 
   const openEditModal = (listing) => {
     setEditModal(listing);
-    setEditForm({ price: listing.price, description: listing.description || '', condition: listing.condition });
+    setEditForm({ 
+      price: listing.price, 
+      rentPrice: listing.rentPrice || 0,
+      description: listing.description || '', 
+      condition: listing.condition 
+    });
   };
 
   const handleEditSave = async () => {
     try {
       const res = await api.put(`/listings/${editModal._id}`, {
         price: Number(editForm.price),
+        rentPrice: Number(editForm.rentPrice),
         description: editForm.description,
         condition: editForm.condition
       });
@@ -133,11 +139,16 @@ export default function DashboardPage() {
                 <div className="space-y-4">
                   {listings.map(l => (
                     <div key={l._id} className="card-neo bg-white p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                      <img src={l.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100'} alt={l.title}
-                        className="w-20 h-20 object-cover border-2 border-black shrink-0" />
+                      <Link href={`/listing/${l._id}`} className="shrink-0 hover:opacity-80 transition-opacity">
+                        <img src={l.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100'} alt={l.title}
+                          className="w-20 h-20 object-cover border-2 border-black" />
+                      </Link>
                       <div className="flex-1 min-w-0">
-                        <Link href={`/listing/${l._id}`} className="font-black uppercase text-sm hover:text-accent-teal truncate block">{l.title}</Link>
-                        <p className="text-accent-teal font-black text-lg">₹{l.price}</p>
+                        <Link href={`/listing/${l._id}`} className="font-black uppercase text-sm hover:text-accent-teal truncate block transition-colors">{l.title}</Link>
+                        <div className="flex flex-col">
+                          {l.type?.includes('sell') && <p className="text-accent-teal font-black text-lg leading-tight">₹{l.price} <span className="text-[10px] font-bold text-gray-400 uppercase">(Sell)</span></p>}
+                          {l.type?.includes('rent') && <p className="text-accent-teal font-black text-lg leading-tight">₹{l.rentPrice || l.price} <span className="text-[10px] font-bold text-gray-400 uppercase">(Rent)</span></p>}
+                        </div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className={`text-[9px] font-black uppercase px-2 py-0.5 border border-black inline-block
                             ${l.status === 'active' ? 'bg-green-100' : l.status === 'sold' ? 'bg-red-100' : 'bg-yellow-100'}`}>{l.status}</span>
@@ -177,12 +188,14 @@ export default function DashboardPage() {
               <div className="space-y-6">
                 <h3 className="font-black uppercase text-sm text-gray-500">Items I'm Renting</h3>
                 {rentals.asRenter?.length === 0 ? <p className="text-sm text-gray-400 font-bold">None</p> : (rentals.asRenter || []).map(r => (
-                  <div key={r._id} className="card-neo bg-white p-4 flex items-center gap-4">
-                    <Calendar size={20} className="text-accent-teal shrink-0" />
-                    <div className="flex-1">
-                      <p className="font-black text-sm">{r.listing?.title || 'Item'}</p>
-                      <p className="text-xs text-gray-500">{new Date(r.startDate).toLocaleDateString()} → {new Date(r.endDate).toLocaleDateString()}</p>
-                    </div>
+                    <div key={r._id} className="card-neo bg-white p-4 flex items-center gap-4">
+                      <Calendar size={20} className="text-accent-teal shrink-0" />
+                      <div className="flex-1">
+                        <Link href={`/listing/${r.listing?._id}`} className="font-black text-sm hover:text-accent-teal block">
+                          {r.listing?.title || 'Item'}
+                        </Link>
+                        <p className="text-xs text-gray-500">{new Date(r.startDate).toLocaleDateString()} → {new Date(r.endDate).toLocaleDateString()}</p>
+                      </div>
                     <span className={`text-[9px] font-black uppercase px-2 py-0.5 border border-black ${r.status === 'active' ? 'bg-green-100' : 'bg-gray-100'}`}>{r.status}</span>
                     <span className="font-black text-accent-teal">₹{r.totalCost}</span>
                   </div>
@@ -192,7 +205,9 @@ export default function DashboardPage() {
                   <div key={r._id} className="card-neo bg-white p-4 flex items-center gap-4">
                     <Calendar size={20} className="text-blue-500 shrink-0" />
                     <div className="flex-1">
-                      <p className="font-black text-sm">{r.listing?.title || 'Item'}</p>
+                      <Link href={`/listing/${r.listing?._id}`} className="font-black text-sm hover:text-accent-teal block">
+                        {r.listing?.title || 'Item'}
+                      </Link>
                       <p className="text-xs text-gray-500">Renter: {r.renter?.name} • {new Date(r.startDate).toLocaleDateString()} → {new Date(r.endDate).toLocaleDateString()}</p>
                     </div>
                     <span className="font-black text-accent-teal">₹{r.totalCost}</span>
@@ -214,7 +229,15 @@ export default function DashboardPage() {
                     <div key={t._id} className="card-neo bg-white p-4 flex items-center gap-4">
                       <Repeat size={20} className="text-accent-teal shrink-0" />
                       <div className="flex-1">
-                        <p className="font-black text-sm">{t.listing?.title} ↔ {t.offeredListing?.title}</p>
+                        <div className="flex items-center gap-2">
+                           <Link href={`/listing/${t.listing?._id}`} className="font-black text-sm hover:text-accent-teal">
+                             {t.listing?.title}
+                           </Link>
+                           <span className="text-gray-400">↔</span>
+                           <Link href={`/listing/${t.offeredListing?._id}`} className="font-black text-sm hover:text-accent-teal">
+                             {t.offeredListing?.title}
+                           </Link>
+                        </div>
                         <p className="text-xs text-gray-500">
                           {t.proposer?._id === user._id ? 'You proposed' : `From ${t.proposer?.name}`}
                         </p>
@@ -280,10 +303,17 @@ export default function DashboardPage() {
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-black uppercase mb-1 text-gray-500">Price (₹)</label>
-                <input type="number" value={editForm.price} onChange={e => setEditForm({...editForm, price: e.target.value})}
-                  className="input-neo w-full px-4 py-3 text-xl font-black" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black uppercase mb-1 text-gray-500">Sale Price (₹)</label>
+                  <input type="number" value={editForm.price} onChange={e => setEditForm({...editForm, price: e.target.value})}
+                    className="input-neo w-full px-4 py-3 text-xl font-black" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black uppercase mb-1 text-gray-500">Rent Price (₹)</label>
+                  <input type="number" value={editForm.rentPrice} onChange={e => setEditForm({...editForm, rentPrice: e.target.value})}
+                    className="input-neo w-full px-4 py-3 text-xl font-black" />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-black uppercase mb-1 text-gray-500">Description</label>

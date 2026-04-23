@@ -7,6 +7,7 @@ import Link from 'next/link';
 import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSocket } from '@/lib/socket';
+import ListingCard from '@/components/ListingCard';
 import { ChevronLeft, MessageSquare, ShoppingBag, Calendar, Repeat, Eye, Star, Edit, Trash2, RotateCcw, Check } from 'lucide-react';
 
 export default function ListingDetailPage() {
@@ -24,19 +25,22 @@ export default function ListingDetailPage() {
 
   // Rent modal
   const [showRentModal, setShowRentModal] = useState(false);
-  const [rentDates, setRentDates] = useState({ start: '', end: '' });
-  const [rentCost, setRentCost] = useState(0);
 
   // Seller edit modal
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editForm, setEditForm] = useState({ price: '', description: '', condition: '' });
+  const [editForm, setEditForm] = useState({ price: '', rentPrice: '', description: '', condition: '' });
 
   useEffect(() => {
     const fetch = async () => {
       try {
         const res = await api.get(`/listings/${id}`);
         setListing(res.data);
-        setEditForm({ price: res.data.price, description: res.data.description, condition: res.data.condition });
+        setEditForm({ 
+          price: res.data.price, 
+          rentPrice: res.data.rentPrice || 0,
+          description: res.data.description, 
+          condition: res.data.condition 
+        });
         const rel = await api.get(`/listings?category=${res.data.category}`);
         setRelated(rel.data.filter(l => l._id !== id).slice(0, 4));
       } catch (err) { console.error(err); }
@@ -44,6 +48,16 @@ export default function ListingDetailPage() {
     };
     if (id) fetch();
   }, [id]);
+
+  const handleRelist = async () => {
+    try {
+      await api.patch(`/listings/${id}/relist`);
+      setListing(prev => ({ ...prev, status: 'active' }));
+      setShowEditModal(false);
+    } catch (err) {
+      console.error('Relist failed:', err);
+    }
+  };
 
   // Real-time status updates
   useEffect(() => {
@@ -56,20 +70,9 @@ export default function ListingDetailPage() {
     return () => socket.off('listing_updated', handler);
   }, [id]);
 
-  // Calculate rent cost
-  useEffect(() => {
-    if (rentDates.start && rentDates.end && listing) {
-      const days = Math.max(1, Math.ceil((new Date(rentDates.end) - new Date(rentDates.start)) / (1000*60*60*24)));
-      let cost = listing.price * days;
-      if (listing.rentPeriod === 'weekly') cost = listing.price * Math.ceil(days / 7);
-      if (listing.rentPeriod === 'monthly') cost = listing.price * Math.ceil(days / 30);
-      setRentCost(cost);
-    }
-  }, [rentDates, listing]);
-
   const startConversation = async () => {
     try {
-      const res = await api.post('/conversations', { listingId: id, receiverId: listing.seller._id });
+      const res = await api.post('/conversations', { receiverId: listing.seller._id });
       return res.data._id;
     } catch (err) { return null; }
   };
@@ -99,23 +102,14 @@ export default function ListingDetailPage() {
       if (convoId) {
         await api.post('/messages', {
           conversationId: convoId,
-          text: `💰 I'd like to buy "${listing.title}" for ₹${listing.price}. Let's finalize the deal!`
+          text: `💰 I'd like to buy "${listing.title}". Let's finalize the deal!`,
+          itemContext: id
         });
       }
       setBuyStep('messaging');
     } catch (err) {
       alert('Something went wrong');
       setShowBuyModal(false);
-    }
-  };
-
-  const handleBuyFinalize = async () => {
-    try {
-      await api.patch(`/listings/${id}/status`, { status: 'sold' });
-      setListing(prev => ({ ...prev, status: 'sold' }));
-      setBuyStep('done');
-    } catch (err) {
-      alert(err.response?.data?.msg || 'Failed to finalize');
     }
   };
 
@@ -128,15 +122,21 @@ export default function ListingDetailPage() {
   // === RENT FLOW ===
   const handleRent = async () => {
     if (!user) { router.push('/login'); return; }
+    
     try {
-      await api.post('/rentals', { listingId: id, startDate: rentDates.start, endDate: rentDates.end });
+      await api.post('/rentals', { listingId: id });
+      
+      const price = listing.rentPrice || listing.price;
+      const successMsg = `Check notification and mark Yes\n\nI've submitted a rental request for "${listing.title}".`;
+      
       setShowRentModal(false);
-      setListing(prev => ({ ...prev, status: 'rented' }));
+      
       const convoId = await startConversation();
       if (convoId) {
         await api.post('/messages', {
           conversationId: convoId,
-          text: `📅 I've submitted a rental request for "${listing.title}" from ${rentDates.start} to ${rentDates.end}. Total: ₹${rentCost}`
+          text: `📅 ${successMsg}`,
+          itemContext: id
         });
         router.push(`/messages?convo=${convoId}`);
       }
@@ -144,18 +144,19 @@ export default function ListingDetailPage() {
   };
 
   // === SELLER CONTROLS ===
-  const handleDelete = async () => {
-    if (!confirm('Delete this listing permanently? This cannot be undone.')) return;
-    try {
-      await api.delete(`/listings/${id}`);
-      router.push('/dashboard');
-    } catch (err) { alert('Failed to delete'); }
-  };
 
   const handleStatusChange = async (status) => {
     try {
       await api.patch(`/listings/${id}/status`, { status });
       setListing(prev => ({ ...prev, status }));
+      
+      // Post-sale deletion prompt
+      if (status === 'sold') {
+        const confirmDelete = window.confirm('This item is now sold. Do you want to delete it from listings?');
+        if (confirmDelete) {
+          await handleDelete(true);
+        }
+      }
     } catch (err) { alert(err.response?.data?.msg || 'Failed'); }
   };
 
@@ -163,12 +164,23 @@ export default function ListingDetailPage() {
     try {
       const res = await api.put(`/listings/${id}`, {
         price: Number(editForm.price),
+        rentPrice: Number(editForm.rentPrice),
         description: editForm.description,
         condition: editForm.condition
       });
       setListing(prev => ({ ...prev, ...res.data }));
       setShowEditModal(false);
     } catch (err) { alert(err.response?.data?.msg || 'Failed to update'); }
+  };
+
+  const handleDelete = async (skipConfirm = false) => {
+    if (!skipConfirm && !window.confirm('Are you sure you want to delete this listing? This action cannot be undone.')) return;
+    try {
+      await api.delete(`/listings/${id}`);
+      router.push('/listings');
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Failed to delete listing');
+    }
   };
 
   if (loading) return (
@@ -195,7 +207,22 @@ export default function ListingDetailPage() {
           <ChevronLeft size={16} /> Back to Browse
         </Link>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+        {isOwner && listing.status === 'expired' && (
+          <div className="card-neo bg-black text-white p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black uppercase italic tracking-tighter">Rental Period Ended</h2>
+              <p className="text-sm font-bold text-gray-400">This item is currently hidden from other users. Would you like to re-list it with the same details?</p>
+            </div>
+            <button 
+              onClick={handleRelist}
+              className="btn-neo bg-accent-teal text-white px-8 py-3 font-black uppercase shadow-[4px_4px_0px_0px_rgba(212,255,63,1)] hover:shadow-none"
+            >
+              Confirm Re-list
+            </button>
+          </div>
+        )}
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
           {/* Image Gallery */}
           <div>
             <div className="card-neo bg-white overflow-hidden mb-4 relative">
@@ -228,13 +255,30 @@ export default function ListingDetailPage() {
                 ))}
                 <span className={`px-3 py-1 text-[10px] font-black uppercase border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]
                   ${listing.status === 'active' ? 'bg-green-100' : listing.status === 'sold' ? 'bg-red-100' : 'bg-yellow-100'}`}>
-                  {listing.status}
+                  {listing.status === 'rented' && listing.rentedUntil ? (
+                     (() => {
+                        const diff = new Date(listing.rentedUntil) - new Date();
+                        if (diff <= 0) return 'rented';
+                        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        if (days > 0) return `Rented (Free in ${days}d ${hours}h)`;
+                        return `Rented (Free in ${hours}h)`;
+                     })()
+                   ) : listing.status}
                 </span>
               </div>
-              <h1 className="text-4xl font-black uppercase italic tracking-tighter">{listing.title}</h1>
-              <p className="text-3xl font-black text-accent-teal mt-2">₹{listing.price}
-                {listing.type?.includes('rent') && <span className="text-sm text-gray-500 ml-1">/{listing.rentPeriod}</span>}
-              </p>
+              <div className="mt-4 space-y-2">
+                {listing.type?.includes('sell') && (
+                  <p className="text-3xl font-black text-accent-teal">
+                    ₹{listing.price} <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">(Buy Now)</span>
+                  </p>
+                )}
+                {listing.type?.includes('rent') && (
+                  <p className="text-3xl font-black text-accent-teal">
+                    ₹{listing.rentPrice || listing.price} <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">({listing.rentPeriod === 'daily' ? 'Per Day' : listing.rentPeriod === 'weekly' ? 'Per Week' : 'Per Month'})</span>
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-4 text-sm text-gray-500 font-bold">
@@ -301,10 +345,14 @@ export default function ListingDetailPage() {
                   <p className="text-xs font-black uppercase text-gray-500 mb-1">You own this listing</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setShowEditModal(true)}
-                    className="btn-neo bg-white py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
-                    <Edit size={16} /> Edit Listing
-                  </button>
+                    <button onClick={() => setShowEditModal(true)}
+                      className="btn-neo bg-white py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
+                      <Edit size={16} /> Edit
+                    </button>
+                    <button onClick={handleDelete}
+                      className="btn-neo bg-red-50 text-red-500 py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
+                      <Trash2 size={16} /> Delete
+                    </button>
                   {listing.status === 'active' ? (
                     <button onClick={() => handleStatusChange('sold')}
                       className="btn-neo bg-green-500 text-white py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
@@ -317,10 +365,7 @@ export default function ListingDetailPage() {
                     </button>
                   )}
                 </div>
-                <button onClick={handleDelete}
-                  className="btn-neo bg-red-500 text-white w-full py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
-                  <Trash2 size={16} /> Delete Listing
-                </button>
+
               </div>
             )}
 
@@ -339,16 +384,21 @@ export default function ListingDetailPage() {
             <h2 className="text-2xl font-black uppercase italic tracking-tighter mb-6">More in {listing.category}</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {related.map(item => (
-                <Link key={item._id} href={`/listing/${item._id}`} className="card-neo bg-white overflow-hidden group">
-                  <div className="h-40 bg-gray-100 overflow-hidden">
-                    <img src={item.images?.[0] || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400'} alt={item.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </div>
-                  <div className="p-3">
-                    <h3 className="font-black uppercase text-xs truncate">{item.title}</h3>
-                    <p className="text-accent-teal font-black">₹{item.price}</p>
-                  </div>
-                </Link>
+                <ListingCard 
+                  key={item._id}
+                  id={item._id}
+                  title={item.title}
+                  price={item.price}
+                  rentPrice={item.rentPrice}
+                  category={item.category}
+                  type={item.type}
+                  condition={item.condition}
+                  image={item.images?.[0]}
+                  status={item.status}
+                  rentedUntil={item.rentedUntil}
+                  views={item.views}
+                  seller={item.seller}
+                />
               ))}
             </div>
           </section>
@@ -403,12 +453,8 @@ export default function ListingDetailPage() {
                 </div>
                 <div className="space-y-3">
                   <button onClick={handleGoToMessages}
-                    className="btn-neo bg-accent-teal text-white w-full py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
-                    <MessageSquare size={16} /> Chat with Seller
-                  </button>
-                  <button onClick={handleBuyFinalize}
-                    className="btn-neo bg-black text-white w-full py-3 uppercase font-black text-sm flex items-center justify-center gap-2">
-                    <ShoppingBag size={16} /> Finalize Deal (Mark as Sold)
+                    className="btn-neo bg-accent-teal text-white w-full py-4 uppercase font-black text-sm flex items-center justify-center gap-2">
+                    <MessageSquare size={16} /> Chat with Seller to Finalize
                   </button>
                 </div>
               </>
@@ -434,26 +480,20 @@ export default function ListingDetailPage() {
           <div className="card-neo bg-white p-8 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-2xl font-black uppercase italic mb-6">Rent "{listing.title}"</h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-black uppercase mb-1 text-gray-500">Start Date</label>
-                <input type="date" value={rentDates.start} onChange={(e) => setRentDates({...rentDates, start: e.target.value})}
-                  className="input-neo w-full px-4 py-3" min={new Date().toISOString().split('T')[0]} />
+              <div className="bg-accent-teal/10 border-2 border-accent-teal p-6 text-center">
+                <span className="text-xs font-black uppercase text-gray-500">Rental Price</span>
+                <p className="text-4xl font-black text-accent-teal">₹{listing.rentPrice || listing.price}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase mt-1">Flat Rate / Request Fee</p>
               </div>
-              <div>
-                <label className="block text-xs font-black uppercase mb-1 text-gray-500">End Date</label>
-                <input type="date" value={rentDates.end} onChange={(e) => setRentDates({...rentDates, end: e.target.value})}
-                  className="input-neo w-full px-4 py-3" min={rentDates.start || new Date().toISOString().split('T')[0]} />
-              </div>
-              {rentCost > 0 && (
-                <div className="bg-accent-teal/10 border-2 border-accent-teal p-4 text-center">
-                  <span className="text-xs font-black uppercase text-gray-500">Total Cost</span>
-                  <p className="text-3xl font-black text-accent-teal">₹{rentCost}</p>
-                </div>
-              )}
-              <div className="flex gap-3">
+              
+              <p className="text-sm text-gray-600 text-center px-4">
+                This will send a request to the owner. The item will be locked only after they approve.
+              </p>
+
+              <div className="flex gap-3 pt-4">
                 <button onClick={() => setShowRentModal(false)} className="btn-neo bg-white flex-1 py-3 uppercase font-black text-sm">Cancel</button>
-                <button onClick={handleRent} disabled={!rentDates.start || !rentDates.end}
-                  className="btn-neo bg-accent-teal text-white flex-1 py-3 uppercase font-black text-sm disabled:opacity-50">Confirm Rental</button>
+                <button onClick={handleRent}
+                  className="btn-neo bg-accent-teal text-white flex-1 py-3 uppercase font-black text-sm">Confirm Request</button>
               </div>
             </div>
           </div>
@@ -466,10 +506,17 @@ export default function ListingDetailPage() {
           <div className="card-neo bg-white p-8 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h2 className="text-2xl font-black uppercase italic mb-6">Edit Listing</h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-black uppercase mb-1 text-gray-500">Price (₹)</label>
-                <input type="number" value={editForm.price} onChange={e => setEditForm({...editForm, price: e.target.value})}
-                  className="input-neo w-full px-4 py-3" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black uppercase mb-1 text-gray-500">Sale Price (₹)</label>
+                  <input type="number" value={editForm.price} onChange={e => setEditForm({...editForm, price: e.target.value})}
+                    className="input-neo w-full px-4 py-3" />
+                </div>
+                <div>
+                  <label className="block text-xs font-black uppercase mb-1 text-gray-500">Rent Price (₹)</label>
+                  <input type="number" value={editForm.rentPrice} onChange={e => setEditForm({...editForm, rentPrice: e.target.value})}
+                    className="input-neo w-full px-4 py-3" />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-black uppercase mb-1 text-gray-500">Description</label>

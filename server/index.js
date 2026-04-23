@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -27,13 +28,22 @@ const io = new Server(server, {
 app.set('io', io);
 
 // Security middleware
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow images to be loaded cross-origin (port 3000 → 5000)
+}));
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
 app.use(cookieParser());
 app.use(express.json());
+
+// Serve uploaded images as static files (with explicit cross-origin header)
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.join(__dirname, 'uploads')));
 
 // Rate limiting on auth routes
 const authLimiter = rateLimit({
@@ -69,6 +79,7 @@ app.use('/api/trades', require('./routes/trades'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/wishlist', require('./routes/wishlist'));
+app.use('/api/upload', require('./routes/upload'));
 
 app.get('/', (req, res) => res.send('TradeHub API v2'));
 
@@ -102,18 +113,30 @@ io.on('connection', (socket) => {
     try {
       const Message = require('./models/Message');
       const Conversation = require('./models/Conversation');
+      
+      const convo = await Conversation.findOne({ 
+        _id: data.conversationId, 
+        participants: socket.userId 
+      });
+      
+      if (!convo) {
+        console.log(`Unauthorized send_message attempt by ${socket.userId}`);
+        return;
+      }
 
       const message = new Message({
         conversation: data.conversationId,
         sender: socket.userId,
         text: data.text,
-        imageUrl: data.imageUrl || ''
+        imageUrl: data.imageUrl || '',
+        itemContext: data.itemContext || null
       });
       await message.save();
-      const populated = await Message.findById(message._id).populate('sender', 'name avatar');
+      const populated = await Message.findById(message._id)
+        .populate('sender', 'name avatar')
+        .populate('itemContext', 'title');
 
       // Update conversation
-      const convo = await Conversation.findById(data.conversationId);
       convo.lastMessage = data.text || '📷 Image';
       convo.lastTimestamp = new Date();
       // Increment unread for all participants except sender
@@ -124,10 +147,10 @@ io.on('connection', (socket) => {
       });
       await convo.save();
 
-      io.to(data.conversationId).emit('new_message', populated);
-
-      // Notify other participants
+      // Emit to each participant's personal room for global real-time notifications
       convo.participants.forEach(p => {
+        io.to(p.toString()).emit('new_message', populated);
+        
         if (p.toString() !== socket.userId) {
           io.to(p.toString()).emit('unread_count_updated', {
             conversationId: data.conversationId,
@@ -143,13 +166,15 @@ io.on('connection', (socket) => {
   socket.on('typing_start', (data) => {
     socket.to(data.conversationId).emit('user_typing', {
       userId: socket.userId,
-      name: data.name
+      name: data.name,
+      conversationId: data.conversationId
     });
   });
 
   socket.on('typing_stop', (data) => {
     socket.to(data.conversationId).emit('user_stopped_typing', {
-      userId: socket.userId
+      userId: socket.userId,
+      conversationId: data.conversationId
     });
   });
 
@@ -159,4 +184,56 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
+  
+  // Background task: Auto-complete expired rentals
+  const checkExpiredRentals = async () => {
+    try {
+      const Rental = mongoose.model('Rental');
+      const Listing = mongoose.model('Listing');
+      
+      const expired = await Rental.find({ 
+        status: 'active', 
+        endDate: { $lt: new Date() } 
+      });
+
+      if (expired.length > 0) {
+        console.log(`[Auto-Rental] Found ${expired.length} expired rentals. Processing...`);
+      }
+
+      for (const rental of expired) {
+        rental.status = 'completed';
+        await rental.save();
+
+        const listing = await Listing.findById(rental.listing);
+        if (listing) {
+          listing.status = 'expired';
+          listing.rentedUntil = null;
+          await listing.save();
+
+          // Notify owner to re-list
+          const Notification = mongoose.model('Notification');
+          const notif = new Notification({
+            recipient: listing.seller,
+            type: 'listing_expired',
+            message: `Your rental period for "${listing.title}" has ended. Would you like to re-list it?`,
+            link: `/listing/${listing._id}`
+          });
+          await notif.save();
+          io.to(listing.seller.toString()).emit('new_notification', notif);
+
+          io.emit('listing_updated', { listingId: listing._id, status: 'expired' });
+          console.log(`[Auto-Rental] Listing "${listing.title}" rental ended. Moved to expired for re-listing.`);
+        }
+      }
+    } catch (err) {
+      console.error('[Auto-Rental] Check failed:', err);
+    }
+  };
+
+  // Run every 10 minutes (600,000 ms)
+  setInterval(checkExpiredRentals, 600000);
+  // Initial check on startup
+  await checkExpiredRentals();
+});

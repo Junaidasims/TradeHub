@@ -17,6 +17,15 @@ function parseWishlistOffer(text) {
   return { requestId: match[1], displayText };
 }
 
+// Helper to get ID as string regardless of object/string or _id/id
+const normalizeId = (id) => {
+  if (!id) return null;
+  if (typeof id === 'string') return id;
+  if (id._id) return String(id._id);
+  if (id.id) return String(id.id);
+  return String(id);
+};
+
 function MessagesContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
@@ -29,6 +38,12 @@ function MessagesContent() {
   const [offerStates, setOfferStates] = useState({}); // { requestId: 'pending'|'accepted'|'declined' }
   const scrollRef = useRef(null);
   const typingTimeout = useRef(null);
+  const activeConvoRef = useRef(null);
+
+  // Keep ref in sync
+  useEffect(() => {
+    activeConvoRef.current = activeConvo;
+  }, [activeConvo]);
 
   // Fetch conversations
   useEffect(() => {
@@ -74,39 +89,114 @@ function MessagesContent() {
     fetchMsgs();
   }, [activeConvo]);
 
-  // Socket.io listeners
+  // Global Socket Listeners (Independent of active conversation)
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !activeConvo) return;
+    if (!socket || !user) return;
 
-    socket.emit('join_conversation', activeConvo._id);
+    const handleGlobalNewMsg = (msg) => {
+      const incomingSenderId = normalizeId(msg.sender);
+      const incomingMsgId = normalizeId(msg._id);
+      const incomingConvoId = normalizeId(msg.conversation);
+      const currentUserId = normalizeId(user);
 
-    const handleNewMsg = (msg) => {
-      setMessages(prev => [...prev, msg]);
-      setTyping(null);
-      setConversations(prev => prev.map(c =>
-        c._id === activeConvo._id ? { ...c, lastMessage: msg.text, lastTimestamp: msg.createdAt } : c
-      ));
+      // (A) Update the specific conversation's messages IF it's the active one
+      const activeConvoId = normalizeId(activeConvoRef.current);
+      if (incomingConvoId === activeConvoId) {
+        setMessages(prev => {
+          if (prev.some(m => normalizeId(m._id) === incomingMsgId)) return prev;
+
+          // Replace optimistic
+          if (incomingSenderId === currentUserId) {
+            const optimisticIndex = prev.findIndex(m => {
+              const isTempId = m._id && m._id.length < 15 && !isNaN(m._id);
+              const sameText = m.text?.trim() === msg.text?.trim();
+              const sameSender = normalizeId(m.sender) === incomingSenderId;
+              return isTempId && sameText && sameSender;
+            });
+            if (optimisticIndex !== -1) {
+              const updated = [...prev];
+              updated[optimisticIndex] = msg;
+              return updated;
+            }
+          }
+          return [...prev, msg];
+        });
+        setTyping(null);
+      }
+
+      // (B) Update the sidebar for ALL messages
+      setConversations(prev => {
+        const index = prev.findIndex(c => normalizeId(c._id) === incomingConvoId);
+        if (index === -1) return prev; // Potentially fetch new convo here if needed
+        
+        const updated = [...prev];
+        const convo = updated[index];
+        const isCurrentActive = incomingConvoId === activeConvoId;
+        
+        updated[index] = {
+          ...convo,
+          lastMessage: msg.text,
+          lastTimestamp: msg.createdAt,
+          unreadCount: {
+            ...convo.unreadCount,
+            [currentUserId]: isCurrentActive ? 0 : (convo.unreadCount?.[currentUserId] || 0) + 1
+          }
+        };
+        // Move to top
+        const item = updated.splice(index, 1)[0];
+        updated.unshift(item);
+        return updated;
+      });
     };
 
     const handleTyping = (data) => {
-      if (data.userId !== user?._id) setTyping(data.name);
+      if (normalizeId(data.conversationId) === normalizeId(activeConvoRef.current?._id)) {
+        if (data.userId !== user?._id) setTyping(data.name);
+      }
     };
     const handleStopTyping = (data) => {
-      if (data.userId !== user?._id) setTyping(null);
+      if (normalizeId(data.conversationId) === normalizeId(activeConvoRef.current?._id)) {
+        if (data.userId !== user?._id) setTyping(null);
+      }
     };
 
-    socket.on('new_message', handleNewMsg);
+    const handleUnreadUpdate = (data) => {
+      setConversations(prev => prev.map(c => 
+        normalizeId(c._id) === normalizeId(data.conversationId) 
+          ? { ...c, unreadCount: { ...c.unreadCount, [normalizeId(user)]: data.count } }
+          : c
+      ));
+    };
+
+    const handleMsgDeleted = (data) => {
+      setMessages(prev => prev.filter(m => normalizeId(m._id) !== normalizeId(data.messageId)));
+    };
+
+    socket.on('new_message', handleGlobalNewMsg);
+    socket.on('unread_count_updated', handleUnreadUpdate);
+    socket.on('message_deleted', handleMsgDeleted);
     socket.on('user_typing', handleTyping);
     socket.on('user_stopped_typing', handleStopTyping);
 
     return () => {
-      socket.emit('leave_conversation', activeConvo._id);
-      socket.off('new_message', handleNewMsg);
+      socket.off('new_message', handleGlobalNewMsg);
+      socket.off('unread_count_updated', handleUnreadUpdate);
+      socket.off('message_deleted', handleMsgDeleted);
       socket.off('user_typing', handleTyping);
       socket.off('user_stopped_typing', handleStopTyping);
     };
-  }, [activeConvo, user]);
+  }, [user]);
+
+  // Handle joining room when active convo changes
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !activeConvo) return;
+    socket.emit('join_conversation', activeConvo._id);
+    return () => {
+      socket.emit('leave_conversation', activeConvo._id);
+    };
+  }, [activeConvo]);
 
   // Auto-scroll
   useEffect(() => {
@@ -150,9 +240,10 @@ function MessagesContent() {
     if (!newMsg.trim()) return;
 
     const socket = getSocket();
+    const currentUserId = normalizeId(user);
     const optimistic = {
       _id: Date.now().toString(),
-      sender: { _id: user._id, name: user.name },
+      sender: { _id: currentUserId, name: user.name },
       text: newMsg,
       createdAt: new Date().toISOString()
     };
@@ -178,11 +269,23 @@ function MessagesContent() {
     }, 1500);
   };
 
+  const handleDeleteMessage = async (msgId) => {
+    if (!window.confirm('Delete this message?')) return;
+    try {
+      await api.delete(`/messages/${msgId}`);
+      // State will be updated via socket listener
+    } catch (err) {
+      alert('Failed to delete message');
+    }
+  };
+
   const getOtherUser = (convo) => convo.participants?.find(p => p._id !== user?._id);
 
   // Render a message bubble — handles wishlist offers specially
   const renderMessage = (msg, i) => {
-    const isMine = msg.sender?._id === user._id;
+    const senderId = normalizeId(msg.sender);
+    const currentUserId = normalizeId(user);
+    const isMine = senderId && currentUserId && senderId === currentUserId;
     const offer = parseWishlistOffer(msg.text);
 
     if (offer) {
@@ -246,13 +349,25 @@ function MessagesContent() {
 
     // Regular message
     return (
-      <div key={msg._id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-        <div className={`max-w-[75%] p-3 border-2 border-black text-sm font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]
+      <div key={msg._id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'} group`}>
+        <div className={`max-w-[75%] p-3 border-2 border-black text-sm font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] relative
           ${isMine ? 'bg-accent-teal text-white' : 'bg-white'}`}>
+          {msg.itemContext && (
+            <div className="text-[10px] uppercase font-black mb-1 opacity-70 flex items-center gap-1 border-b border-black/10 pb-1">
+              <Package size={10} /> Re: {msg.itemContext.title || 'Item'}
+            </div>
+          )}
           {msg.text}
           <div className={`text-[8px] mt-1 opacity-60 font-black ${isMine ? 'text-right' : ''}`}>
             {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
+          {/* Delete button only for my messages */}
+          {isMine && (
+            <button onClick={() => handleDeleteMessage(msg._id)}
+              className="absolute -top-2 -left-2 bg-red-500 text-white p-1 border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] opacity-0 group-hover:opacity-100 transition-opacity">
+              <X size={10} />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -310,7 +425,6 @@ function MessagesContent() {
                             <span className="bg-red-500 text-white text-[9px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0">{unread}</span>
                           )}
                         </div>
-                        {convo.listing && <p className="text-[9px] text-accent-teal font-bold mt-0.5 truncate">Re: {convo.listing.title}</p>}
                       </div>
                     </button>
                   );
@@ -337,7 +451,7 @@ function MessagesContent() {
                     </div>
                     <div>
                       <p className="font-black uppercase text-sm">{getOtherUser(activeConvo)?.name}</p>
-                      {activeConvo.listing && <p className="text-[9px] opacity-80">Re: {activeConvo.listing.title}</p>}
+                      <p className="text-[9px] opacity-80">Connected User</p>
                     </div>
                   </div>
 

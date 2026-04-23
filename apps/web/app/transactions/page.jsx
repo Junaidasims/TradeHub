@@ -69,7 +69,7 @@ export default function TransactionsPage() {
                  <div>
                    <p className="text-[10px] font-black uppercase text-gray-500">Counterparty</p>
                    <p className="text-sm font-black uppercase tracking-tight">
-                     {tx.requesterID?._id === user.id ? tx.ownerID?.username : tx.requesterID?.username}
+                     {tx.requesterID?._id === user._id ? tx.ownerID?.username : tx.requesterID?.username}
                    </p>
                  </div>
               </div>

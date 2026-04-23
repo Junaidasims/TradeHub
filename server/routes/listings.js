@@ -1,13 +1,45 @@
 const express = require('express');
 const router = express.Router();
 const Listing = require('../models/Listing');
+const jwt = require('jsonwebtoken');
 require('../models/User'); // Register User schema for populate
 const auth = require('../middleware/auth');
+const verified = require('../middleware/verified');
 
 // GET / — all active listings with filters
 router.get('/', async (req, res) => {
-  const { category, type, minPrice, maxPrice, condition, sort, search } = req.query;
-  const filter = {};
+  const { category, type, minPrice, maxPrice, condition, sort, search, seller } = req.query;
+  
+  // Optional auth to hide rented items for owner
+  let userId = null;
+  const token = req.cookies?.token || req.header('Authorization')?.replace('Bearer ', '');
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      userId = decoded.user?.id || decoded.id;
+    } catch (err) { /* silent fail for optional auth */ }
+  }
+
+  // Base query: show active ones, unless a specific seller is requested
+  let filter = { status: 'active' };
+  
+  if (seller) {
+    filter = { seller };
+  } else {
+    // PUBLIC BROWSE LOGIC
+    if (userId) {
+      // Show active items OR rented items NOT owned by the current user
+      filter = {
+        $or: [
+          { status: 'active' },
+          { status: 'rented', seller: { $ne: userId } }
+        ]
+      };
+    } else {
+      // Show all active and rented items for guest
+      filter = { status: { $in: ['active', 'rented'] } };
+    }
+  }
 
   if (category) filter.category = category;
   if (type) filter.type = type;
@@ -55,12 +87,13 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST / — create listing
-router.post('/', auth, async (req, res) => {
-  const { title, description, category, condition, type, price, rentPeriod, tradePreference, images } = req.body;
+router.post('/', auth, verified, async (req, res) => {
+  const { title, description, category, condition, type, price, rentPrice, rentPeriod, tradePreference, images } = req.body;
   try {
     const listing = new Listing({
       title, description, category, condition, type,
       price: price || 0,
+      rentPrice: rentPrice || 0,
       rentPeriod, tradePreference,
       images: images || [],
       seller: req.user.id
@@ -140,20 +173,8 @@ router.patch('/:id/status', auth, async (req, res) => {
     const listing = await Listing.findById(req.params.id);
     if (!listing) return res.status(404).json({ msg: 'Listing not found' });
 
-    const isSeller = listing.seller.toString() === req.user.id;
-
-    // Allow buyers (who have a conversation for this listing) to mark as 'sold'
-    if (!isSeller) {
-      if (req.body.status === 'sold') {
-        const Conversation = require('../models/Conversation');
-        const convo = await Conversation.findOne({
-          listing: req.params.id,
-          participants: req.user.id
-        });
-        if (!convo) return res.status(403).json({ msg: 'Not authorized' });
-      } else {
-        return res.status(403).json({ msg: 'Only the seller can change this status' });
-      }
+    if (listing.seller.toString() !== req.user.id) {
+      return res.status(403).json({ msg: 'Only the item owner can mark this listing as sold.' });
     }
 
     listing.status = req.body.status;
@@ -163,21 +184,27 @@ router.patch('/:id/status', auth, async (req, res) => {
     const io = req.app.get('io');
     io.emit('listing_updated', { listingId: listing._id, status: listing.status });
 
-    // If a buyer finalized the deal, notify the seller
-    if (!isSeller && req.body.status === 'sold') {
-      const Notification = require('../models/Notification');
-      const User = require('../models/User');
-      const buyer = await User.findById(req.user.id);
-      const notif = new Notification({
-        recipient: listing.seller,
-        type: 'trade_accepted',
-        message: `${buyer?.name || 'A buyer'} finalized the purchase of "${listing.title}"`,
-        link: `/listing/${listing._id}`
-      });
-      await notif.save();
-      io.to(listing.seller.toString()).emit('new_notification', notif);
-    }
+    res.json(listing);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
 
+// PATCH /:id/relist — Restore an expired listing
+router.patch('/:id/relist', auth, async (req, res) => {
+  try {
+    const listing = await Listing.findById(req.params.id);
+    if (!listing) return res.status(404).json({ msg: 'Listing not found' });
+    if (listing.seller.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized' });
+    
+    listing.status = 'active';
+    listing.rentedUntil = null;
+    await listing.save();
+    
+    const io = req.app.get('io');
+    io.emit('listing_updated', { listingId: listing._id, status: 'active' });
+    
     res.json(listing);
   } catch (err) {
     console.error(err.message);

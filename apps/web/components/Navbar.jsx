@@ -22,8 +22,11 @@ export default function Navbar() {
     const handleUnread = () => {
       setUnreadMessages(prev => prev + 1);
     };
-    const handleNotif = () => {
+    const handleNotif = (notif) => {
       setUnreadNotifs(prev => prev + 1);
+      if (notif?.type === 'rental_request') {
+        alert(notif.message);
+      }
     };
 
     socket.on('unread_count_updated', handleUnread);

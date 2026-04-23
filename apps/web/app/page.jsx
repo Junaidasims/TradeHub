@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Navbar from "@/components/Navbar";
 import Link from 'next/link';
 import api from '@/lib/api';
+import ListingCard from '@/components/ListingCard';
 import { ArrowRight, Package, MessageSquare, Repeat, TrendingUp, Users, ShoppingBag } from 'lucide-react';
 
 const CATEGORIES = [
@@ -101,29 +102,21 @@ export default function HomePage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {featured.map((item) => (
-              <Link key={item._id} href={`/listing/${item._id}`} className="card-neo bg-white overflow-hidden group">
-                <div className="h-48 bg-gray-100 overflow-hidden">
-                  <img
-                    src={item.images?.[0] || `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400`}
-                    alt={item.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                  />
-                </div>
-                <div className="p-4">
-                  <div className="flex gap-1 mb-2">
-                    {item.type?.map(t => (
-                      <span key={t} className="px-2 py-0.5 bg-accent-teal text-white text-[9px] font-black uppercase border border-black">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                  <h3 className="font-black uppercase text-sm truncate">{item.title}</h3>
-                  <p className="text-accent-teal font-black text-lg">₹{item.price}</p>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">
-                    by {item.seller?.name || 'Unknown'} • {item.condition}
-                  </p>
-                </div>
-              </Link>
+              <ListingCard 
+                key={item._id}
+                id={item._id}
+                title={item.title}
+                price={item.price}
+                rentPrice={item.rentPrice}
+                category={item.category}
+                type={item.type}
+                condition={item.condition}
+                image={item.images?.[0]}
+                status={item.status}
+                rentedUntil={item.rentedUntil}
+                views={item.views}
+                seller={item.seller}
+              />
             ))}
           </div>
         </section>

@@ -74,7 +74,7 @@ export default function RentalsPage() {
   return (
     <main className="min-h-screen bg-cream">
       <Navbar />
-      
+
       {/* Header */}
       <header className="bg-accent-teal text-white py-16 border-b-4 border-black">
         <div className="container mx-auto px-4">
@@ -90,21 +90,21 @@ export default function RentalsPage() {
                 Need a drafter for one lab? An iron for an interview? Rent it from your dorm mates for a few bucks.
               </p>
             </div>
-            
+
             <div className="w-full md:w-auto card-neo bg-white text-black p-6 space-y-4">
-               <div className="flex items-center gap-2 font-black uppercase text-sm">
-                  <Calendar size={18} /> Select Dates
-               </div>
-               <div className="flex flex-col sm:flex-row gap-4">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase text-gray-400">From</p>
-                    <input type="date" className="input-neo py-2 px-3 text-sm" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase text-gray-400">Until</p>
-                    <input type="date" className="input-neo py-2 px-3 text-sm" />
-                  </div>
-               </div>
+              <div className="flex items-center gap-2 font-black uppercase text-sm">
+                <Calendar size={18} /> Select Dates
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase text-gray-400">From</p>
+                  <input type="date" className="input-neo py-2 px-3 text-sm" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase text-gray-400">Until</p>
+                  <input type="date" className="input-neo py-2 px-3 text-sm" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -115,38 +115,38 @@ export default function RentalsPage() {
           {/* Filters */}
           <aside className="w-full lg:w-72 space-y-8">
             <div className="card-neo bg-accent-cyan p-6">
-               <h3 className="text-xl font-black uppercase mb-4 italic">Safety First</h3>
-               <ul className="space-y-3 font-bold text-sm">
-                 <li className="flex gap-2"><ShieldCheck size={18} /> Verified IDs</li>
-                 <li className="flex gap-2"><ShieldCheck size={18} /> Deposit Escrow</li>
-                 <li className="flex gap-2"><ShieldCheck size={18} /> UPI Protection</li>
-               </ul>
+              <h3 className="text-xl font-black uppercase mb-4 italic">Safety First</h3>
+              <ul className="space-y-3 font-bold text-sm">
+                <li className="flex gap-2"><ShieldCheck size={18} /> Verified IDs</li>
+                <li className="flex gap-2"><ShieldCheck size={18} /> Deposit Escrow</li>
+                <li className="flex gap-2"><ShieldCheck size={18} /> UPI Protection</li>
+              </ul>
             </div>
 
             <div className="space-y-6">
               <div>
-                  <SlidersHorizontal size={18} /> Filtering
+                <SlidersHorizontal size={18} /> Filtering
                 <div className="space-y-4">
                   <div className="card-neo bg-white p-4">
-                     <p className="text-xs font-black uppercase mb-3">Price / Day</p>
-                     <input type="range" className="w-full accent-black" />
-                     <div className="flex justify-between font-bold text-[10px] mt-1">
-                        <span>₹10</span>
-                        <span>₹200+</span>
-                     </div>
+                    <p className="text-xs font-black uppercase mb-3">Price / Day</p>
+                    <input type="range" className="w-full accent-black" />
+                    <div className="flex justify-between font-bold text-[10px] mt-1">
+                      <span>₹10</span>
+                      <span>₹200+</span>
+                    </div>
                   </div>
 
                   <div className="card-neo bg-white p-4">
-                     <p className="text-xs font-black uppercase mb-3">Hostel Block</p>
-                     <div className="relative">
-                        <select className="w-full appearance-none border-2 border-black p-2 font-bold text-xs">
-                          <option>All Blocks</option>
-                          <option>Block A</option>
-                          <option>Block B</option>
-                          <option>Canteen Area</option>
-                        </select>
-                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" size={14} />
-                     </div>
+                    <p className="text-xs font-black uppercase mb-3">Hostel Block</p>
+                    <div className="relative">
+                      <select className="w-full appearance-none border-2 border-black p-2 font-bold text-xs">
+                        <option>All Blocks</option>
+                        <option>Block A</option>
+                        <option>Block B</option>
+                        <option>Canteen Area</option>
+                      </select>
+                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" size={14} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -163,8 +163,8 @@ export default function RentalsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
               {RENTAL_DATA.map((item) => (
-                <ItemCard 
-                  key={item.id} 
+                <ItemCard
+                  key={item.id}
                   id={item.id}
                   name={item.title}
                   category={item.category}
@@ -173,29 +173,29 @@ export default function RentalsPage() {
                   pricePerDay={item.price}
                   images={[item.image]}
                   currentState="Available"
-                  ownerID={{ username: "CampusOwner", reputationScore: 10 }} 
+                  ownerID={{ username: "CampusOwner", reputationScore: 10 }}
                 />
               ))}
             </div>
 
             {/* Empty State / Bottom Info */}
             <div className="mt-16 card-neo bg-white p-12 text-center space-y-6 text-black">
-               <div className="text-5xl">⚡</div>
-               <h2 className="text-3xl font-black uppercase italic tracking-tighter">Don&apos;t see what you need?</h2>
-               <p className="font-bold text-gray-600 max-w-md mx-auto italic">
-                 Post a &quot;Wishlist&quot; request and let someone in the campus know you&apos;re looking to rent.
-               </p>
-               <button 
+              <div className="text-5xl">⚡</div>
+              <h2 className="text-3xl font-black uppercase italic tracking-tighter">Don&apos;t see what you need?</h2>
+              <p className="font-bold text-gray-600 max-w-md mx-auto italic">
+                Post a &quot;Wishlist&quot; request and let someone in the campus know you&apos;re looking to rent.
+              </p>
+              <button
                 onClick={() => router.push("/create-listing")}
                 className="btn-neo bg-accent-teal text-white px-8 py-3 text-lg"
-               >
+              >
                 LIST AN ITEM
-               </button>
+              </button>
             </div>
           </section>
         </div>
       </div>
-      
+
       <UndoButton />
     </main>
   );

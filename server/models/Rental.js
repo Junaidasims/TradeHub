@@ -4,10 +4,10 @@ const rentalSchema = new mongoose.Schema({
   listing: { type: mongoose.Schema.Types.ObjectId, ref: 'Listing', required: true },
   renter: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  startDate: { type: Date, required: true },
-  endDate: { type: Date, required: true },
+  startDate: { type: Date },
+  endDate: { type: Date },
   totalCost: { type: Number, required: true },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
+   status: { type: String, enum: ['pending', 'active', 'completed', 'cancelled', 'rejected'], default: 'pending' },
   createdAt: { type: Date, default: Date.now }
 });
 
