@@ -7,7 +7,7 @@ const rentalSchema = new mongoose.Schema({
   startDate: { type: Date },
   endDate: { type: Date },
   totalCost: { type: Number, required: true },
-   status: { type: String, enum: ['pending', 'active', 'completed', 'cancelled', 'rejected'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'active', 'completed', 'cancelled', 'rejected'], default: 'pending' },
   createdAt: { type: Date, default: Date.now }
 });
 

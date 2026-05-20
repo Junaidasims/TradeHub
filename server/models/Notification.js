@@ -4,7 +4,7 @@ const notificationSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   type: {
     type: String,
-    enum: ['message', 'trade_proposal', 'trade_accepted', 'trade_declined', 'rental_confirmed', 'rental_request', 'review'],
+    enum: ['message', 'trade_proposal', 'trade_accepted', 'trade_declined', 'rental_confirmed', 'rental_request', 'review', 'tracking_request', 'tracking_response', 'smart_alert'],
     required: true
   },
   message: { type: String, required: true },

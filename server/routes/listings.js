@@ -88,22 +88,44 @@ router.get('/:id', async (req, res) => {
 
 // POST / — create listing
 router.post('/', auth, verified, async (req, res) => {
-  const { title, description, category, condition, type, price, rentPrice, rentPeriod, tradePreference, images } = req.body;
+  const { title, description, category, condition, type, price, rentPrice, rentPeriod, tradePreference, images, lat, lng, address } = req.body;
   try {
+    // Normalize data for strict backend enums
+    const normalizedCondition = condition ? (condition.charAt(0).toUpperCase() + condition.slice(1).toLowerCase()) : 'Good';
+    // Match specific multi-word enums
+    const finalCondition = normalizedCondition === 'Like new' ? 'Like New' : normalizedCondition;
+    
+    const finalType = Array.isArray(type) 
+      ? type.map(t => t.toLowerCase()) 
+      : [type?.toLowerCase() || 'trade'];
+
     const listing = new Listing({
-      title, description, category, condition, type,
+      title, 
+      description, 
+      category, 
+      condition: finalCondition, 
+      type: finalType,
       price: price || 0,
       rentPrice: rentPrice || 0,
-      rentPeriod, tradePreference,
+      rentPeriod: rentPeriod?.toLowerCase() || 'daily',
+      tradePreference,
       images: images || [],
-      seller: req.user.id
+      seller: req.user.id,
+      location: {
+        type: 'Point',
+        coordinates: [Number(lng) || 0, Number(lat) || 0]
+      },
+      address: address || ''
     });
     await listing.save();
     const populated = await Listing.findById(listing._id).populate('seller', 'name avatar rating');
-    res.json(populated);
+    res.status(201).json(populated);
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    console.error('Create listing error:', err);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ msg: Object.values(err.errors).map(e => e.message).join(', ') });
+    }
+    res.status(500).json({ msg: 'Server error while creating listing' });
   }
 });
 

@@ -28,13 +28,29 @@ export default function ItemDetail() {
   const handleRequest = async () => {
     if (!user || !item) return router.push('/login');
     try {
-      await api.post('/transactions/create', {
-        itemID: id,
-        type: item.type === 'Rent' ? 'Rent' : 'Trade'
-      });
-      router.push('/transactions');
-    } catch {
-      alert('Request failed');
+      if (item.type === 'Rent') {
+        // 1. Create Rental request
+        const rentalRes = await api.post('/rentals', { listingId: id });
+        const rentalId = rentalRes.data._id;
+
+        // 2. Get or create conversation with owner
+        const ownerId = item.ownerID?._id || item.ownerID;
+        const convoRes = await api.post('/conversations', { receiverId: ownerId });
+        const convoId = convoRes.data._id;
+
+        // 3. Send interactive offer message
+        await api.post('/messages', {
+          conversationId: convoId,
+          text: `[rental-offer:${rentalId}]`
+        });
+
+        // 4. Redirect to chat
+        router.push(`/messages?convo=${convoId}`);
+      } else {
+        alert('Trade flow not yet fully implemented with interactive cards.');
+      }
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Request failed');
     }
   };
 

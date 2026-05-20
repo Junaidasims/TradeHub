@@ -15,9 +15,15 @@ const listingSchema = new mongoose.Schema({
   seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: { type: String, enum: ['active', 'sold', 'rented', 'traded', 'expired'], default: 'active' },
   views: { type: Number, default: 0 },
+  location: {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], default: [0, 0] } // [longitude, latitude]
+  },
+  address: { type: String, default: '' },
   createdAt: { type: Date, default: Date.now }
 });
 
+listingSchema.index({ location: '2dsphere' });
 listingSchema.index({ seller: 1 });
 listingSchema.index({ status: 1 });
 listingSchema.index({ category: 1 });

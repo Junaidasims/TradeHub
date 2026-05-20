@@ -6,6 +6,22 @@ const Notification = require('../models/Notification');
 const auth = require('../middleware/auth');
 const verified = require('../middleware/verified');
 
+// GET /:id — Get rental by ID
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const rental = await Rental.findById(req.params.id)
+      .populate('renter', 'name avatar')
+      .populate('owner', 'name avatar')
+      .populate('listing', 'title images price pricePerDay category type');
+    if (!rental) return res.status(404).json({ msg: 'Rental not found' });
+    res.json(rental);
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') return res.status(404).json({ msg: 'Rental not found' });
+    res.status(500).send('Server Error');
+  }
+});
+
 // POST / — create rental (Pending Approval)
 router.post('/', auth, verified, async (req, res) => {
   const { listingId } = req.body;
@@ -30,7 +46,7 @@ router.post('/', auth, verified, async (req, res) => {
     const notif = new Notification({
       recipient: listing.seller,
       type: 'rental_request',
-      message: `Check notification and mark Yes\n\n${renter?.name || 'A buyer'} has submitted a rental request for "${listing.title}".`,
+      message: `${renter?.name || 'A student'} has submitted a rental request for "${listing.title}". Please review it in your dashboard.`,
       data: { rentalId: rental._id },
       link: `/notifications`
     });

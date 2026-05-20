@@ -14,7 +14,12 @@ const app = express();
 const server = http.createServer(app);
 
 // Allowed origins
-const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001'];
+const allowedOrigins = [
+  'http://localhost:3000', 
+  'http://localhost:3001',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 // Socket.io setup
 const io = new Server(server, {
@@ -80,6 +85,7 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/wishlist', require('./routes/wishlist'));
 app.use('/api/upload', require('./routes/upload'));
+app.use('/api/ai', require('./routes/ai'));
 
 app.get('/', (req, res) => res.send('TradeHub API v2'));
 

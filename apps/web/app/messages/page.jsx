@@ -6,7 +6,14 @@ import Navbar from '@/components/Navbar';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
-import { Send, ArrowLeft, Check, X, Package } from 'lucide-react';
+import { Send, ArrowLeft, Check, X, Package, Sparkles } from 'lucide-react';
+
+// Parse rental offer from message text
+function parseRentalOffer(text) {
+  const match = text?.match(/\[rental-offer:([a-f0-9]+)\]/);
+  if (!match) return null;
+  return { rentalId: match[1] };
+}
 
 // Parse wishlist offer from message text
 function parseWishlistOffer(text) {
@@ -36,6 +43,9 @@ function MessagesContent() {
   const [typing, setTyping] = useState(null);
   const [loading, setLoading] = useState(true);
   const [offerStates, setOfferStates] = useState({}); // { requestId: 'pending'|'accepted'|'declined' }
+  const [rentalDetails, setRentalDetails] = useState({}); // { rentalId: details }
+  const [suggestedReplies, setSuggestedReplies] = useState([]);
+  const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
   const scrollRef = useRef(null);
   const typingTimeout = useRef(null);
   const activeConvoRef = useRef(null);
@@ -83,6 +93,14 @@ function MessagesContent() {
               setOfferStates(prev => ({ ...prev, [offer.requestId]: statusRes.data.status }));
             } catch (e) { /* ignore */ }
           }
+          
+          const rentalOffer = parseRentalOffer(msg.text);
+          if (rentalOffer) {
+            try {
+              const rentalRes = await api.get(`/rentals/${rentalOffer.rentalId}`);
+              setRentalDetails(prev => ({ ...prev, [rentalOffer.rentalId]: rentalRes.data }));
+            } catch (e) { console.error(e); }
+          }
         }
       } catch (err) { console.error(err); }
     };
@@ -90,6 +108,44 @@ function MessagesContent() {
   }, [activeConvo]);
 
   // Global Socket Listeners (Independent of active conversation)
+
+  // Trigger smart replies generation when messages change and last message is from other user
+  useEffect(() => {
+    if (!messages || messages.length === 0 || !user || !activeConvo) return;
+    
+    const lastMessage = messages[messages.length - 1];
+    const isFromMe = normalizeId(lastMessage.sender) === normalizeId(user);
+    
+    if (isFromMe) {
+      setSuggestedReplies([]); // clear replies if I just sent a message
+      return;
+    }
+
+    const generateReplies = async () => {
+      try {
+        setIsGeneratingReplies(true);
+        // Get last 5 messages for context
+        const recentMessages = messages.slice(-5).map(m => ({
+          sender: normalizeId(m.sender) === normalizeId(user) ? 'Me' : 'Other',
+          text: m.text
+        }));
+
+        const res = await api.post('/ai/smart-replies', { context: recentMessages });
+        if (res.data && res.data.replies) {
+          setSuggestedReplies(res.data.replies);
+        }
+      } catch (err) {
+        console.error('Failed to generate smart replies:', err);
+      } finally {
+        setIsGeneratingReplies(false);
+      }
+    };
+
+    // Add a tiny delay so it feels natural
+    const timer = setTimeout(generateReplies, 500);
+    return () => clearTimeout(timer);
+  }, [messages, user, activeConvo]);
+
   useEffect(() => {
     const socket = getSocket();
     if (!socket || !user) return;
@@ -203,6 +259,29 @@ function MessagesContent() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, typing]);
 
+  // Accept/Decline rental offer
+  const handleRentalAction = async (rentalId, action) => {
+    try {
+      if (action === 'accept') {
+        await api.patch(`/rentals/${rentalId}/approve`);
+        setRentalDetails(prev => ({ ...prev, [rentalId]: { ...prev[rentalId], status: 'active' } }));
+        await api.post('/messages', {
+          conversationId: activeConvo._id,
+          text: `✅ I've accepted your rental request! Please arrange for pickup.`
+        });
+      } else {
+        await api.patch(`/rentals/${rentalId}/reject`);
+        setRentalDetails(prev => ({ ...prev, [rentalId]: { ...prev[rentalId], status: 'rejected' } }));
+        await api.post('/messages', {
+          conversationId: activeConvo._id,
+          text: `❌ I'm sorry, I have to decline this rental request.`
+        });
+      }
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Failed');
+    }
+  };
+
   // Accept/Decline wishlist offer
   const handleOfferAction = async (requestId, action) => {
     try {
@@ -286,60 +365,113 @@ function MessagesContent() {
     const senderId = normalizeId(msg.sender);
     const currentUserId = normalizeId(user);
     const isMine = senderId && currentUserId && senderId === currentUserId;
-    const offer = parseWishlistOffer(msg.text);
-
-    if (offer) {
-      const state = offerStates[offer.requestId];
-      // The request owner (not the person who sent the offer) can accept/reject
-      const canAct = !isMine && (state === 'open' || !state);
+    
+    const rentalOffer = parseRentalOffer(msg.text);
+    if (rentalOffer) {
+      const details = rentalDetails[rentalOffer.rentalId];
+      if (!details) return null; // loading state
+      
+      const isOwner = details.owner?._id === currentUserId || details.owner === currentUserId;
+      const canAct = isOwner && details.status === 'pending';
 
       return (
         <div key={msg._id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-          <div className={`max-w-[80%] border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] overflow-hidden
-            ${isMine ? 'bg-accent-teal text-white' : 'bg-white'}`}>
-            {/* Offer header */}
-            <div className={`px-4 py-2 flex items-center gap-2 text-xs font-black uppercase border-b-2 border-black
-              ${isMine ? 'bg-black/20' : 'bg-accent-teal/10 text-accent-teal'}`}>
-              <Package size={14} /> Wishlist Offer
+          <div className={`max-w-[80%] rounded-2xl border border-gray-200 dark:border-darkBorder shadow-sm overflow-hidden bg-white dark:bg-darkCard text-gray-800 dark:text-gray-100`}>
+            <div className={`px-4 py-2 flex items-center gap-2 text-xs font-semibold uppercase border-b border-gray-100 dark:border-darkBorder bg-accent-teal/10 dark:bg-accent-teal/20 text-accent-teal dark:text-accent-teal`}>
+              <Package size={14} /> Rental Request
             </div>
-            {/* Offer body */}
-            <div className="p-4">
-              <div className="text-sm font-bold whitespace-pre-line">{offer.displayText}</div>
-              <div className={`text-[8px] mt-2 opacity-60 font-black ${isMine ? 'text-right' : ''}`}>
-                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
+            <div className="p-4 flex gap-4 items-center">
+               {details.listing?.images?.[0] ? (
+                 <img src={details.listing.images[0]} alt="Item" className="w-16 h-16 object-cover rounded-lg shadow-sm" />
+               ) : (
+                 <div className="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-lg flex items-center justify-center text-xs font-medium text-gray-400 dark:text-gray-500">No Img</div>
+               )}
+               <div>
+                 <h4 className="font-semibold text-lg leading-tight truncate w-40">{details.listing?.title || 'Item'}</h4>
+                 <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Total: ₹{details.totalCost}</p>
+                 <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Requested by {details.renter?.name}</p>
+               </div>
             </div>
-            {/* Action buttons — only for the request owner viewing someone else's offer */}
             {canAct && (
-              <div className="border-t-2 border-black flex">
-                <button onClick={() => handleOfferAction(offer.requestId, 'accept')}
-                  className="flex-1 py-3 font-black uppercase text-xs flex items-center justify-center gap-1 bg-green-500 text-white hover:bg-green-600 transition-colors border-r border-black">
+              <div className="border-t border-gray-100 dark:border-darkBorder flex">
+                <button onClick={() => handleRentalAction(rentalOffer.rentalId, 'accept')}
+                  className="flex-1 py-3 font-semibold text-xs flex items-center justify-center gap-1 bg-green-50 dark:bg-green-500/10 hover:bg-green-100 dark:hover:bg-green-500/20 text-green-600 dark:text-green-400 transition-colors border-r border-gray-100 dark:border-darkBorder">
                   <Check size={14} /> Accept
                 </button>
-                <button onClick={() => handleOfferAction(offer.requestId, 'decline')}
-                  className="flex-1 py-3 font-black uppercase text-xs flex items-center justify-center gap-1 bg-red-50 text-red-500 hover:bg-red-100 transition-colors">
+                <button onClick={() => handleRentalAction(rentalOffer.rentalId, 'decline')}
+                  className="flex-1 py-3 font-semibold text-xs flex items-center justify-center gap-1 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 dark:text-red-400 transition-colors">
                   <X size={14} /> Decline
                 </button>
               </div>
             )}
-            {/* Status badges */}
+            {details.status === 'active' && (
+              <div className="border-t border-gray-100 dark:border-darkBorder bg-green-50 dark:bg-green-500/10 py-2 px-4 text-center">
+                <span className="text-xs font-semibold text-green-600 dark:text-green-400 flex items-center justify-center gap-1">
+                  <Check size={14} /> Request Approved
+                </span>
+              </div>
+            )}
+            {details.status === 'rejected' && (
+              <div className="border-t border-gray-100 dark:border-darkBorder bg-red-50 dark:bg-red-500/10 py-2 px-4 text-center">
+                <span className="text-xs font-semibold text-red-500 dark:text-red-400 flex items-center justify-center gap-1">
+                  <X size={14} /> Request Declined
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const offer = parseWishlistOffer(msg.text);
+
+    if (offer) {
+      const state = offerStates[offer.requestId];
+      const canAct = !isMine && (state === 'open' || !state);
+
+      return (
+        <div key={msg._id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+          <div className={`max-w-[80%] rounded-2xl border border-gray-100 dark:border-darkBorder shadow-sm overflow-hidden
+            ${isMine ? 'bg-gradient-to-br from-accent-teal to-accent-cyan text-white' : 'bg-white dark:bg-darkCard text-gray-800 dark:text-gray-100'}`}>
+            <div className={`px-4 py-2 flex items-center gap-2 text-xs font-semibold uppercase border-b border-white/20 dark:border-darkBorder
+              ${isMine ? 'bg-black/10' : 'bg-accent-teal/10 dark:bg-accent-teal/20 text-accent-teal dark:text-accent-teal border-gray-100'}`}>
+              <Package size={14} /> Wishlist Offer
+            </div>
+            <div className="p-4">
+              <div className="text-sm font-medium whitespace-pre-line">{offer.displayText}</div>
+              <div className={`text-[9px] mt-2 opacity-70 ${isMine ? 'text-right' : ''}`}>
+                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+            {canAct && (
+              <div className="border-t border-gray-100 dark:border-darkBorder flex">
+                <button onClick={() => handleOfferAction(offer.requestId, 'accept')}
+                  className="flex-1 py-3 font-semibold text-xs flex items-center justify-center gap-1 bg-green-50 dark:bg-green-500/10 hover:bg-green-100 dark:hover:bg-green-500/20 text-green-600 dark:text-green-400 transition-colors border-r border-gray-100 dark:border-darkBorder">
+                  <Check size={14} /> Accept
+                </button>
+                <button onClick={() => handleOfferAction(offer.requestId, 'decline')}
+                  className="flex-1 py-3 font-semibold text-xs flex items-center justify-center gap-1 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-500 dark:text-red-400 transition-colors">
+                  <X size={14} /> Decline
+                </button>
+              </div>
+            )}
             {state === 'fulfilled' && (
-              <div className="border-t-2 border-black bg-green-100 py-2 px-4 text-center">
-                <span className="text-xs font-black uppercase text-green-700 flex items-center justify-center gap-1">
+              <div className="border-t border-gray-100 dark:border-darkBorder bg-green-50 dark:bg-green-500/10 py-2 px-4 text-center">
+                <span className="text-xs font-semibold text-green-600 dark:text-green-400 flex items-center justify-center gap-1">
                   <Check size={14} /> Offer Accepted
                 </span>
               </div>
             )}
             {state === 'declined' && (
-              <div className="border-t-2 border-black bg-red-50 py-2 px-4 text-center">
-                <span className="text-xs font-black uppercase text-red-500 flex items-center justify-center gap-1">
+              <div className="border-t border-gray-100 dark:border-darkBorder bg-red-50 dark:bg-red-500/10 py-2 px-4 text-center">
+                <span className="text-xs font-semibold text-red-500 dark:text-red-400 flex items-center justify-center gap-1">
                   <X size={14} /> Offer Declined
                 </span>
               </div>
             )}
             {state === 'closed' && (
-              <div className="border-t-2 border-black bg-gray-100 py-2 px-4 text-center">
-                <span className="text-xs font-black uppercase text-gray-500">Request Closed</span>
+              <div className="border-t border-gray-100 dark:border-darkBorder bg-gray-50 dark:bg-slate-800 py-2 px-4 text-center">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Request Closed</span>
               </div>
             )}
           </div>
@@ -350,21 +482,20 @@ function MessagesContent() {
     // Regular message
     return (
       <div key={msg._id || i} className={`flex ${isMine ? 'justify-end' : 'justify-start'} group`}>
-        <div className={`max-w-[75%] p-3 border-2 border-black text-sm font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] relative
-          ${isMine ? 'bg-accent-teal text-white' : 'bg-white'}`}>
+        <div className={`max-w-[75%] px-4 py-2.5 text-sm font-medium relative shadow-sm
+          ${isMine ? 'bg-gradient-to-br from-accent-teal to-accent-cyan text-white rounded-2xl rounded-tr-sm' : 'bg-white dark:bg-darkCard border border-gray-200 dark:border-darkBorder text-gray-800 dark:text-gray-100 rounded-2xl rounded-tl-sm'}`}>
           {msg.itemContext && (
-            <div className="text-[10px] uppercase font-black mb-1 opacity-70 flex items-center gap-1 border-b border-black/10 pb-1">
+            <div className="text-[10px] uppercase font-semibold mb-1 opacity-80 flex items-center gap-1 border-b border-white/20 dark:border-gray-600 pb-1">
               <Package size={10} /> Re: {msg.itemContext.title || 'Item'}
             </div>
           )}
           {msg.text}
-          <div className={`text-[8px] mt-1 opacity-60 font-black ${isMine ? 'text-right' : ''}`}>
+          <div className={`text-[9px] mt-1 opacity-70 ${isMine ? 'text-right text-white/80' : 'text-gray-400 dark:text-gray-400'}`}>
             {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
-          {/* Delete button only for my messages */}
           {isMine && (
             <button onClick={() => handleDeleteMessage(msg._id)}
-              className="absolute -top-2 -left-2 bg-red-500 text-white p-1 border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] opacity-0 group-hover:opacity-100 transition-opacity">
+              className="absolute -top-2 -left-2 bg-red-500 text-white p-1 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity">
               <X size={10} />
             </button>
           )}
@@ -375,54 +506,54 @@ function MessagesContent() {
 
 
   if (!user) return (
-    <main className="min-h-screen bg-cream"><Navbar />
-      <div className="container mx-auto px-4 py-20 text-center font-black uppercase italic">Please log in to view messages</div>
+    <main className="min-h-screen bg-cream dark:bg-darkBg transition-colors duration-200"><Navbar />
+      <div className="container mx-auto px-4 py-20 text-center font-semibold text-gray-500 dark:text-gray-400">Please log in to view messages</div>
     </main>
   );
 
   return (
-    <main className="min-h-screen bg-cream">
+    <main className="min-h-screen bg-cream dark:bg-darkBg transition-colors duration-200 pb-10">
       <Navbar />
-      <div className="container mx-auto px-4 py-4">
-        <div className="card-neo bg-white overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
+      <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="bg-white dark:bg-darkCard rounded-3xl shadow-sm border border-gray-100 dark:border-darkBorder overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
           <div className="flex h-full">
 
             {/* Conversation List */}
-            <div className={`w-full md:w-80 border-r-2 border-black flex flex-col ${activeConvo ? 'hidden md:flex' : 'flex'}`}>
-              <div className="p-4 border-b-2 border-black bg-cream">
-                <h2 className="text-xl font-black uppercase italic">Messages</h2>
+            <div className={`w-full md:w-96 border-r border-gray-100 dark:border-darkBorder flex flex-col bg-gray-50/50 dark:bg-darkBg/50 ${activeConvo ? 'hidden md:flex' : 'flex'}`}>
+              <div className="p-5 border-b border-gray-100 dark:border-darkBorder bg-white dark:bg-darkCard">
+                <h2 className="text-xl font-bold tracking-tight text-gray-800 dark:text-white">Messages</h2>
               </div>
               <div className="flex-1 overflow-y-auto">
                 {loading ? (
                   <div className="p-4 space-y-3">
-                    {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 animate-pulse" />)}
+                    {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 dark:bg-slate-800 animate-pulse rounded-xl" />)}
                   </div>
                 ) : conversations.length === 0 ? (
-                  <div className="p-8 text-center">
-                    <div className="text-4xl mb-2">📪</div>
-                    <p className="text-sm font-bold text-gray-500">No conversations yet</p>
+                  <div className="p-8 text-center mt-10">
+                    <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-2xl mb-4 mx-auto">📪</div>
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">No conversations yet</p>
                   </div>
                 ) : conversations.map(convo => {
                   const other = getOtherUser(convo);
                   const unread = convo.unreadCount?.[user._id] || 0;
                   return (
                     <button key={convo._id} onClick={() => setActiveConvo(convo)}
-                      className={`w-full text-left p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors flex items-center gap-3
-                        ${activeConvo?._id === convo._id ? 'bg-accent-teal/10 border-l-4 border-l-accent-teal' : ''}`}>
-                      <div className="w-10 h-10 bg-accent-teal text-white border-2 border-black flex items-center justify-center font-black shrink-0">
+                      className={`w-full text-left p-4 border-b border-gray-100 dark:border-darkBorder hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-3
+                        ${activeConvo?._id === convo._id ? 'bg-white dark:bg-slate-800 border-l-4 border-l-accent-teal shadow-sm z-10' : ''}`}>
+                      <div className="w-12 h-12 rounded-full bg-accent-teal/10 dark:bg-accent-teal/20 text-accent-teal dark:text-accent-teal flex items-center justify-center font-bold text-lg shrink-0">
                         {other?.name?.charAt(0) || '?'}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-center">
-                          <span className="font-black text-sm truncate">{other?.name}</span>
-                          <span className="text-[9px] text-gray-400 font-bold shrink-0">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-semibold text-sm text-gray-800 dark:text-gray-200 truncate">{other?.name}</span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium shrink-0">
                             {convo.lastTimestamp ? new Date(convo.lastTimestamp).toLocaleDateString() : ''}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center mt-0.5">
-                          <p className="text-xs text-gray-500 truncate">{convo.lastMessage || 'No messages'}</p>
+                        <div className="flex justify-between items-center">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate pr-2">{convo.lastMessage || 'No messages'}</p>
                           {unread > 0 && (
-                            <span className="bg-red-500 text-white text-[9px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0">{unread}</span>
+                            <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center shrink-0 shadow-sm">{unread}</span>
                           )}
                         </div>
                       </div>
@@ -433,47 +564,70 @@ function MessagesContent() {
             </div>
 
             {/* Chat Window */}
-            <div className={`flex-1 flex flex-col ${!activeConvo ? 'hidden md:flex' : 'flex'}`}>
+            <div className={`flex-1 flex flex-col bg-white dark:bg-darkCard ${!activeConvo ? 'hidden md:flex' : 'flex'}`}>
               {!activeConvo ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-6xl mb-4">💬</div>
-                    <p className="font-black uppercase italic text-gray-400">Select a conversation</p>
+                <div className="flex-1 flex items-center justify-center bg-gray-50/50 dark:bg-darkBg/50">
+                  <div className="text-center opacity-50 hover:opacity-100 transition-opacity">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto">💬</div>
+                    <p className="font-medium text-gray-500 dark:text-gray-400">Select a conversation to start chatting</p>
                   </div>
                 </div>
               ) : (
                 <>
                   {/* Chat Header */}
-                  <div className="p-4 border-b-2 border-black bg-accent-teal text-white flex items-center gap-3">
-                    <button onClick={() => setActiveConvo(null)} className="md:hidden"><ArrowLeft size={20} /></button>
-                    <div className="w-8 h-8 bg-black/20 border border-white flex items-center justify-center font-black text-sm">
+                  <div className="px-6 py-4 border-b border-gray-100 dark:border-darkBorder bg-white dark:bg-darkCard flex items-center gap-4">
+                    <button onClick={() => setActiveConvo(null)} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300 transition-colors"><ArrowLeft size={20} /></button>
+                    <div className="w-10 h-10 rounded-full bg-accent-teal/10 dark:bg-accent-teal/20 text-accent-teal dark:text-accent-teal flex items-center justify-center font-bold text-lg">
                       {getOtherUser(activeConvo)?.name?.charAt(0)}
                     </div>
                     <div>
-                      <p className="font-black uppercase text-sm">{getOtherUser(activeConvo)?.name}</p>
-                      <p className="text-[9px] opacity-80">Connected User</p>
+                      <p className="font-bold text-gray-800 dark:text-white">{getOtherUser(activeConvo)?.name}</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">Online</p>
                     </div>
                   </div>
 
                   {/* Messages */}
-                  <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-cream">
+                  <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/30 dark:bg-darkBg/30">
                     {messages.map((msg, i) => renderMessage(msg, i))}
                     {typing && (
                       <div className="flex justify-start">
-                        <div className="bg-gray-200 border-2 border-black px-4 py-2 text-xs font-bold italic animate-pulse">
-                          {typing} is typing...
+                        <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-darkBorder rounded-2xl rounded-tl-sm px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center gap-2 shadow-sm">
+                          <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-slate-600 animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                          <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-slate-600 animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                          <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-slate-600 animate-bounce" style={{ animationDelay: '300ms' }}></span>
                         </div>
                       </div>
                     )}
                   </div>
 
+                  {/* Smart Replies */}
+                  {(suggestedReplies.length > 0 || isGeneratingReplies) && (
+                    <div className="px-6 py-3 bg-white dark:bg-darkCard border-t border-gray-100 dark:border-darkBorder flex items-center gap-2 overflow-x-auto hide-scrollbar">
+                      {isGeneratingReplies ? (
+                        <div className="flex items-center gap-2 text-xs font-semibold text-accent-teal dark:text-accent-teal animate-pulse bg-accent-teal/5 dark:bg-accent-teal/10 px-4 py-2 rounded-full">
+                          <Sparkles size={14} /> AI is thinking...
+                        </div>
+                      ) : (
+                        suggestedReplies.map((reply, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setNewMsg(reply)}
+                            className="shrink-0 bg-white dark:bg-darkCard border border-accent-teal/20 dark:border-accent-teal/30 px-4 py-2 text-sm font-medium text-accent-teal dark:text-accent-teal hover:bg-accent-teal dark:hover:bg-accent-teal hover:text-white dark:hover:text-white transition-all rounded-full shadow-sm"
+                          >
+                            {reply}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+
                   {/* Input */}
-                  <div className="p-4 border-t-2 border-black bg-white">
-                    <form onSubmit={handleSend} className="flex gap-2">
+                  <div className="p-4 border-t border-gray-100 dark:border-darkBorder bg-white dark:bg-darkCard">
+                    <form onSubmit={handleSend} className="flex gap-3 max-w-4xl mx-auto">
                       <input type="text" value={newMsg} onChange={handleInputChange}
-                        placeholder="Type a message..." className="input-neo flex-1 px-4 py-3" />
+                        placeholder="Type your message..." className="input-neo flex-1 dark:bg-slate-800 dark:border-darkBorder dark:text-white" />
                       <button type="submit" disabled={!newMsg.trim()}
-                        className="btn-neo bg-black text-white p-3 disabled:opacity-50">
+                        className="bg-accent-teal hover:bg-accent-teal/90 text-white h-[50px] w-[50px] rounded-xl flex items-center justify-center transition-all disabled:opacity-50 disabled:hover:bg-accent-teal shadow-md">
                         <Send size={20} />
                       </button>
                     </form>
@@ -490,7 +644,7 @@ function MessagesContent() {
 
 export default function MessagesPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-cream flex items-center justify-center font-black uppercase">Loading...</div>}>
+    <Suspense fallback={<div className="min-h-screen bg-cream dark:bg-darkBg flex items-center justify-center font-semibold text-gray-500 dark:text-gray-400">Loading...</div>}>
       <MessagesContent />
     </Suspense>
   );

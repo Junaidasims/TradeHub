@@ -4,17 +4,21 @@ import { useState, useRef, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
-import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2 } from 'lucide-react';
+import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2, Sparkles, Wand2 } from 'lucide-react';
 
 export default function CreateListing() {
   const [formData, setFormData] = useState({
-    name: '',
+    title: '',
+    description: '',
     category: '',
-    condition: 'good',
-    type: 'Trade',
-    pricePerDay: '',
+    condition: 'Good',
+    type: 'trade',
+    price: '',
+    rentPrice: '',
+    rentPeriod: 'daily',
     lng: 0,
     lat: 0,
+    address: '',
     images: []
   });
 
@@ -24,9 +28,95 @@ export default function CreateListing() {
   const fileInputRef = useRef(null);
   const router = useRouter();
 
+  // AI Auto-Fill state
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuccess, setAiSuccess] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const aiFileInputRef = useRef(null);
+
+  const analyzeWithAI = async (file) => {
+    if (!file) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiSuccess(false);
+
+    // Also add the image to the upload zone as a preview
+    const preview = URL.createObjectURL(file);
+    const startIndex = uploadedImages.length;
+    if (uploadedImages.length < 5) {
+      setUploadedImages(prev => [...prev, { preview, url: null, uploading: true, error: null }]);
+      // Upload to server normally in parallel
+      const data = new FormData();
+      data.append('image', file);
+      api.post('/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } })
+        .then(res => {
+          setUploadedImages(prev => {
+            const updated = [...prev];
+            updated[startIndex] = { ...updated[startIndex], url: res.data.url, uploading: false, error: null };
+            return updated;
+          });
+        })
+        .catch(() => {
+          setUploadedImages(prev => {
+            const updated = [...prev];
+            updated[startIndex] = { ...updated[startIndex], uploading: false, error: 'Upload failed' };
+            return updated;
+          });
+        });
+    }
+
+    // Send to AI for analysis
+    try {
+      const formPayload = new FormData();
+      formPayload.append('image', file);
+      const res = await api.post('/ai/analyze-image', formPayload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const { title, description, category, condition, suggestedPrice } = res.data;
+      
+      // Strict normalization for backend enum compatibility
+      const conditionMap = {
+        'new': 'New',
+        'like new': 'Like New',
+        'good': 'Good',
+        'fair': 'Fair',
+        'poor': 'Fair' // Fallback for unsupported 'poor'
+      };
+      const normalizedCondition = conditionMap[condition?.toLowerCase()] || 'Good';
+
+      setFormData(prev => ({
+        ...prev,
+        title: title || prev.title,
+        description: description || prev.description,
+        category: category || prev.category,
+        condition: normalizedCondition,
+        price: suggestedPrice || prev.price,
+        rentPrice: suggestedPrice || prev.rentPrice
+      }));
+      setAiSuccess(true);
+      setTimeout(() => setAiSuccess(false), 4000);
+    } catch (err) {
+      setAiError(err.response?.data?.msg || 'AI analysis failed. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleLocation = () => {
-    navigator.geolocation.getCurrentPosition((pos) => {
-      setFormData({ ...formData, lng: pos.coords.longitude, lat: pos.coords.latitude });
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      setFormData(prev => ({ ...prev, lat, lng }));
+      
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+        const data = await res.json();
+        if (data && data.display_name) {
+          setFormData(prev => ({ ...prev, address: data.display_name }));
+        }
+      } catch (err) {
+        console.error('Reverse geocoding failed:', err);
+      }
     });
   };
 
@@ -117,15 +207,17 @@ export default function CreateListing() {
       : [categoryImages[formData.category] || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3'];
 
     try {
-      await api.post('/items/create', {
+      await api.post('/listings', {
         ...formData,
-        images: finalImages,
-        pricePerDay: (formData.type === 'Rent' || formData.type === 'Sell') ? parseInt(formData.pricePerDay) : undefined,
-        geoPosition: { type: 'Point', coordinates: [formData.lng, formData.lat] }
+        type: [formData.type], // Send as array
+        price: Number(formData.price) || 0,
+        rentPrice: Number(formData.rentPrice) || 0,
+        images: finalImages
       });
       router.push('/dashboard');
     } catch (err) {
-      alert(err.response?.data?.msg || 'Failed to create listing');
+      console.error('Submission failed:', err);
+      alert(err.response?.data?.msg || 'Failed to create listing. Please check all fields.');
     }
   };
 
@@ -140,15 +232,73 @@ export default function CreateListing() {
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-6">
+
+              {/* AI Auto-Fill Button */}
               <div>
-                <label className="block font-black uppercase text-sm mb-2 italic">Item Name</label>
+                <input
+                  ref={aiFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  id="ai-image-input"
+                  onChange={(e) => { if (e.target.files?.[0]) analyzeWithAI(e.target.files[0]); e.target.value = ''; }}
+                />
+                <button
+                  type="button"
+                  onClick={() => aiFileInputRef.current?.click()}
+                  disabled={aiLoading}
+                  className="w-full py-3 px-4 flex items-center justify-center gap-2 font-black uppercase text-sm transition-all"
+                  style={{
+                    background: aiSuccess
+                      ? 'linear-gradient(135deg, #10b981, #059669)'
+                      : aiLoading
+                      ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+                      : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                    color: '#fff',
+                    border: '3px solid #000',
+                    boxShadow: aiLoading || aiSuccess ? '2px 2px 0 #000' : '5px 5px 0 #000',
+                    transform: aiLoading || aiSuccess ? 'translate(3px, 3px)' : 'none',
+                    cursor: aiLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {aiLoading ? (
+                    <><Loader2 size={16} className="animate-spin" /> Analyzing Image…</>
+                  ) : aiSuccess ? (
+                    <><Check size={16} /> Fields Auto-Filled!</>
+                  ) : (
+                    <><Sparkles size={16} /> Auto-Fill with AI</>  
+                  )}
+                </button>
+                {aiError && (
+                  <p className="text-red-600 text-[10px] font-bold mt-1 italic">{aiError}</p>
+                )}
+                {!aiError && (
+                  <p className="text-[10px] font-bold text-gray-400 mt-1 italic">
+                    📸 Upload a photo — AI will fill in the title, description & price for you!
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block font-black uppercase text-sm mb-2 italic">Item Title</label>
                 <input
                   type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  value={formData.title}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
                   className="input-neo w-full px-4 py-3"
-                  placeholder="e.g. Morris Mano Digital logic"
+                  placeholder="e.g. Morris Mano Digital Logic"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="block font-black uppercase text-sm mb-2 italic">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  className="input-neo w-full px-4 py-3 resize-none"
+                  rows={3}
+                  placeholder="Describe your item…"
                 />
               </div>
 
@@ -176,12 +326,12 @@ export default function CreateListing() {
                   <select
                     value={formData.condition}
                     onChange={(e) => setFormData({...formData, condition: e.target.value})}
-                    className="input-neo w-full px-4 py-3 appearance-none bg-white"
+                    className="input-neo w-full px-4 py-3 appearance-none bg-white font-black"
                   >
-                    <option value="new">New</option>
-                    <option value="good">Good</option>
-                    <option value="fair">Fair</option>
-                    <option value="poor">Poor</option>
+                    <option value="New">New</option>
+                    <option value="Like New">Like New</option>
+                    <option value="Good">Good</option>
+                    <option value="Fair">Fair</option>
                   </select>
                 </div>
                 <div>
@@ -191,24 +341,25 @@ export default function CreateListing() {
                     onChange={(e) => setFormData({...formData, type: e.target.value})}
                     className="input-neo w-full px-4 py-3 appearance-none bg-white font-black"
                   >
-                    <option value="Trade">TRADE</option>
-                    <option value="Rent">RENT</option>
-                    <option value="Sell">SELL</option>
-                    <option value="Share">SHARE</option>
+                    <option value="trade">TRADE</option>
+                    <option value="rent">RENT</option>
+                    <option value="sell">SELL</option>
+                    <option value="share">SHARE</option>
                   </select>
                 </div>
               </div>
 
-              {(formData.type === 'Rent' || formData.type === 'Sell') && (
+              {(formData.type === 'rent' || formData.type === 'sell') && (
                 <div>
                   <label className="block font-black uppercase text-sm mb-2 italic">
-                    {formData.type === 'Rent' ? 'Price (₹ per day)' : 'Sale Price (₹)'}
+                    {formData.type === 'sell' ? 'Sale Price (₹)' : 'Value/Rent (₹)'}
                   </label>
                   <input
                     type="number"
-                    value={formData.pricePerDay}
-                    onChange={(e) => setFormData({...formData, pricePerDay: e.target.value})}
+                    value={formData.price}
+                    onChange={(e) => setFormData({...formData, price: e.target.value})}
                     className="input-neo w-full px-4 py-3"
+                    placeholder="0.00"
                     required
                   />
                 </div>
@@ -318,6 +469,18 @@ export default function CreateListing() {
                   {formData.lng !== 0 ? <><Check size={14} /> CAPTURED</> : 'CAPTURE GPS'}
                 </button>
               </div>
+
+              {formData.address && (
+                <div className="mt-4">
+                  <label className="block font-black uppercase text-[10px] mb-1 italic text-gray-500">Proper Address</label>
+                  <textarea
+                    value={formData.address}
+                    onChange={(e) => setFormData({...formData, address: e.target.value})}
+                    className="input-neo w-full px-4 py-2 text-xs font-bold leading-tight"
+                    rows={3}
+                  />
+                </div>
+              )}
 
               <button
                 type="submit"

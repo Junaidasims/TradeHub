@@ -26,6 +26,23 @@ export default function ListingsPage() {
     sort: 'newest',
     search: searchParams.get('search') || ''
   });
+  const [userLocation, setUserLocation] = useState(null);
+
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.error("Error getting location:", error);
+        }
+      );
+    }
+  }, []);
 
   const fetchListings = async () => {
     setLoading(true);
@@ -52,58 +69,58 @@ export default function ListingsPage() {
   }, []);
 
   const Skeleton = () => (
-    <div className="card-neo bg-white overflow-hidden animate-pulse">
-      <div className="h-48 bg-gray-200" />
-      <div className="p-4 space-y-3">
-        <div className="h-3 bg-gray-200 rounded w-1/3" />
-        <div className="h-4 bg-gray-200 rounded w-2/3" />
-        <div className="h-5 bg-gray-200 rounded w-1/4" />
+    <div className="card-neo bg-white dark:bg-darkCard border-gray-100 dark:border-darkBorder overflow-hidden animate-pulse">
+      <div className="h-48 bg-gray-200 dark:bg-slate-700 rounded-xl mb-4" />
+      <div className="space-y-3">
+        <div className="h-3 bg-gray-200 dark:bg-slate-700 rounded w-1/3" />
+        <div className="h-4 bg-gray-200 dark:bg-slate-700 rounded w-2/3" />
+        <div className="h-5 bg-gray-200 dark:bg-slate-700 rounded w-1/4 mt-4" />
       </div>
     </div>
   );
 
   return (
-    <main className="min-h-screen bg-cream">
+    <main className="min-h-screen bg-cream dark:bg-darkBg transition-colors duration-200">
       <Navbar />
       <div className="container mx-auto px-4 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
 
           {/* Filters Sidebar */}
           <aside className="w-full lg:w-72 shrink-0">
-            <div className="card-neo bg-white p-6 sticky top-24 space-y-6">
+            <div className="card-neo bg-white dark:bg-darkCard border-gray-100 dark:border-darkBorder p-6 sticky top-24 space-y-6 shadow-sm">
               <div className="flex items-center gap-2 mb-2">
-                <Sliders size={18} className="text-accent-teal" />
-                <h2 className="text-xl font-black uppercase italic">Filters</h2>
+                <Sliders size={18} className="text-accent-teal dark:text-accent-teal" />
+                <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white">Filters</h2>
               </div>
 
               {/* Search */}
               <div>
-                <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Search</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Search</label>
                 <div className="relative">
                   <input type="text" value={filters.search} onChange={(e) => setFilters({...filters, search: e.target.value})}
-                    placeholder="Keywords..." className="input-neo w-full px-3 py-2 text-sm pr-8" />
-                  <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
+                    placeholder="Keywords..." className="input-neo w-full pl-9 py-2 text-sm" />
+                  <Search size={14} className="absolute left-3 top-3 text-gray-400 dark:text-gray-500" />
                 </div>
               </div>
 
               {/* Category */}
               <div>
-                <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Category</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Category</label>
                 <select value={filters.category} onChange={(e) => setFilters({...filters, category: e.target.value})}
-                  className="input-neo w-full px-3 py-2 text-sm bg-white">
-                  <option value="">All</option>
+                  className="input-neo w-full px-3 py-2 text-sm bg-white dark:bg-slate-800">
+                  <option value="">All Categories</option>
                   {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
 
               {/* Type */}
               <div>
-                <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Type</label>
-                <div className="flex gap-2">
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Type</label>
+                <div className="flex gap-2 bg-gray-50 dark:bg-slate-800/50 p-1 rounded-xl">
                   {TYPES.map(t => (
                     <button key={t} onClick={() => setFilters({...filters, type: filters.type === t ? '' : t})}
-                      className={`flex-1 py-1.5 text-[9px] font-black border-2 border-black uppercase transition-all
-                        ${filters.type === t ? 'bg-accent-teal text-white shadow-none' : 'bg-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'}`}>
+                      className={`flex-1 py-1.5 text-[11px] font-semibold rounded-lg capitalize transition-all
+                        ${filters.type === t ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}>
                       {t}
                     </button>
                   ))}
@@ -112,33 +129,33 @@ export default function ListingsPage() {
 
               {/* Condition */}
               <div>
-                <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Condition</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Condition</label>
                 <select value={filters.condition} onChange={(e) => setFilters({...filters, condition: e.target.value})}
-                  className="input-neo w-full px-3 py-2 text-sm bg-white">
-                  <option value="">All</option>
+                  className="input-neo w-full px-3 py-2 text-sm bg-white dark:bg-slate-800">
+                  <option value="">Any Condition</option>
                   {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
 
               {/* Price Range */}
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Min ₹</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Min ₹</label>
                   <input type="number" value={filters.minPrice} onChange={(e) => setFilters({...filters, minPrice: e.target.value})}
                     className="input-neo w-full px-3 py-2 text-sm" placeholder="0" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Max ₹</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Max ₹</label>
                   <input type="number" value={filters.maxPrice} onChange={(e) => setFilters({...filters, maxPrice: e.target.value})}
-                    className="input-neo w-full px-3 py-2 text-sm" placeholder="∞" />
+                    className="input-neo w-full px-3 py-2 text-sm" placeholder="Any" />
                 </div>
               </div>
 
               {/* Sort */}
               <div>
-                <label className="block text-[10px] font-black uppercase mb-1 text-gray-500">Sort By</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500 dark:text-gray-400">Sort By</label>
                 <select value={filters.sort} onChange={(e) => setFilters({...filters, sort: e.target.value})}
-                  className="input-neo w-full px-3 py-2 text-sm bg-white">
+                  className="input-neo w-full px-3 py-2 text-sm bg-white dark:bg-slate-800">
                   <option value="newest">Newest First</option>
                   <option value="price_asc">Price: Low → High</option>
                   <option value="price_desc">Price: High → Low</option>
@@ -151,8 +168,8 @@ export default function ListingsPage() {
           {/* Results Grid */}
           <div className="flex-1">
             <div className="flex justify-between items-center mb-6">
-              <h1 className="text-3xl font-black uppercase italic tracking-tighter">
-                {loading ? 'Loading...' : `${listings.length} Results`}
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+                {loading ? 'Searching...' : `${listings.length} Results Found`}
               </h1>
             </div>
 
@@ -161,11 +178,11 @@ export default function ListingsPage() {
                 {[1,2,3,4,5,6].map(i => <Skeleton key={i} />)}
               </div>
             ) : listings.length === 0 ? (
-              <div className="card-neo bg-white p-16 text-center">
-                <div className="text-6xl mb-4">🔍</div>
-                <h3 className="text-2xl font-black uppercase italic mb-2">No listings found</h3>
-                <p className="text-gray-500 font-bold text-sm mb-6">Try adjusting your filters or be the first to post!</p>
-                <Link href="/create" className="btn-neo bg-accent-teal text-white px-6 py-3 uppercase font-black">Post an Item</Link>
+              <div className="card-neo bg-white dark:bg-darkCard p-16 text-center shadow-sm">
+                <div className="text-5xl mb-4">🔍</div>
+                <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">No listings found</h3>
+                <p className="text-gray-500 dark:text-gray-400 font-medium text-sm mb-6">Try adjusting your filters or be the first to post!</p>
+                <Link href="/create" className="btn-neo-primary px-6 py-2">Post an Item</Link>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -184,6 +201,8 @@ export default function ListingsPage() {
                     rentedUntil={item.rentedUntil}
                     views={item.views}
                     seller={item.seller}
+                    itemLocation={item.location}
+                    userLocation={userLocation}
                   />
                 ))}
               </div>
