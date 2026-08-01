@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+const rawUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const SOCKET_URL = rawUrl.replace(/\/api\/?$/, '').replace(/\/+$/, '') || 'http://localhost:5000';
 
 let socket = null;
 
@@ -33,4 +34,5 @@ export const disconnectSocket = () => {
   }
 };
 
-export default { getSocket, connectSocket, disconnectSocket };
+const socketUtil = { getSocket, connectSocket, disconnectSocket };
+export default socketUtil;

@@ -34,17 +34,28 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024 } // 8 MB
 });
 
+const getBaseUrl = (req) => {
+  // In production (Render), use explicit BACKEND_URL env var if set
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL.replace(/\/+$/, '');
+  }
+  const protocol = req.headers['x-forwarded-proto']?.split(',')[0]?.trim() || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  return `${protocol}://${host}`;
+};
+
 // POST /api/upload — upload single image, returns { url }
 router.post('/', auth, upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ msg: 'No file uploaded' });
-  const url = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  const url = `${getBaseUrl(req)}/uploads/${req.file.filename}`;
   res.json({ url });
 });
 
 // POST /api/upload/multiple — upload up to 5 images, returns { urls: [] }
 router.post('/multiple', auth, upload.array('images', 5), (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ msg: 'No files uploaded' });
-  const urls = req.files.map(f => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
+  const baseUrl = getBaseUrl(req);
+  const urls = req.files.map(f => `${baseUrl}/uploads/${f.filename}`);
   res.json({ urls });
 });
 

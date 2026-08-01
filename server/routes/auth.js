@@ -9,6 +9,16 @@ const generateToken = (user) => {
   return jwt.sign({ user: { id: user._id } }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
+const getCookieOptions = () => {
+  const isProd = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: isProd ? 'none' : 'lax',
+    secure: isProd
+  };
+};
+
 // POST /register
 router.post('/register', async (req, res) => {
   const { name, email, password, college } = req.body;
@@ -26,7 +36,7 @@ router.post('/register', async (req, res) => {
     await user.save();
 
     const token = generateToken(user);
-    res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' });
+    res.cookie('token', token, getCookieOptions());
     res.json({ 
       token, 
       user: { _id: user._id, name: user.name, email: user.email, college: user.college, avatar: user.avatar, rating: user.rating, isVerified: user.isVerified }
@@ -48,7 +58,7 @@ router.post('/login', async (req, res) => {
     if (!isMatch) return res.status(400).json({ msg: 'Invalid credentials' });
 
     const token = generateToken(user);
-    res.cookie('token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' });
+    res.cookie('token', token, getCookieOptions());
     res.json({ token, user: { _id: user._id, name: user.name, email: user.email, college: user.college, avatar: user.avatar, rating: user.rating } });
   } catch (err) {
     console.error(err.message);
@@ -58,7 +68,12 @@ router.post('/login', async (req, res) => {
 
 // POST /logout
 router.post('/logout', (req, res) => {
-  res.clearCookie('token');
+  const isProd = process.env.NODE_ENV === 'production';
+  res.clearCookie('token', {
+    httpOnly: true,
+    sameSite: isProd ? 'none' : 'lax',
+    secure: isProd
+  });
   res.json({ msg: 'Logged out' });
 });
 

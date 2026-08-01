@@ -54,6 +54,7 @@ export default function Navbar() {
     { href: '/listings', label: 'Browse' },
     { href: '/wishlist', label: 'Wishlist' },
     { href: '/messages', label: 'Messages', badge: unreadMessages },
+    { href: '/transactions', label: 'Transactions' },
   ];
 
   const isActive = (href) => pathname === href || pathname?.startsWith(href + '/');

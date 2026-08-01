@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
-import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2, Sparkles, AlertCircle, Edit3 } from 'lucide-react';
 
 export default function CreateListing() {
   const [formData, setFormData] = useState({
@@ -33,6 +33,10 @@ export default function CreateListing() {
   const [aiSuccess, setAiSuccess] = useState(false);
   const [aiError, setAiError] = useState('');
   const aiFileInputRef = useRef(null);
+
+  // Location state
+  const [locationStatus, setLocationStatus] = useState('idle'); // 'idle' | 'loading' | 'captured' | 'denied' | 'manual'
+  const [manualAddress, setManualAddress] = useState('');
 
   const analyzeWithAI = async (file) => {
     if (!file) return;
@@ -103,21 +107,67 @@ export default function CreateListing() {
   };
 
   const handleLocation = () => {
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      setFormData(prev => ({ ...prev, lat, lng }));
-      
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
-        const data = await res.json();
-        if (data && data.display_name) {
-          setFormData(prev => ({ ...prev, address: data.display_name }));
+    if (!navigator.geolocation) {
+      setLocationStatus('denied');
+      return;
+    }
+    setLocationStatus('loading');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setFormData(prev => ({ ...prev, lat, lng }));
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          const data = await res.json();
+          if (data?.display_name) {
+            setFormData(prev => ({ ...prev, address: data.display_name }));
+          }
+        } catch (err) {
+          console.error('Reverse geocoding failed:', err);
         }
-      } catch (err) {
-        console.error('Reverse geocoding failed:', err);
+        setLocationStatus('captured');
+      },
+      (err) => {
+        console.warn('Geolocation denied or failed:', err.message);
+        setLocationStatus('denied');
+      },
+      { timeout: 10000 }
+    );
+  };
+
+  // Geocode a manually entered address to get lat/lng
+  const handleManualAddressGeocode = async () => {
+    const addr = manualAddress.trim();
+    if (!addr) return;
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1`,
+        { headers: { 'Accept-Language': 'en' } }
+      );
+      const results = await res.json();
+      if (results && results.length > 0) {
+        const { lat, lon, display_name } = results[0];
+        setFormData(prev => ({
+          ...prev,
+          lat: parseFloat(lat),
+          lng: parseFloat(lon),
+          address: display_name
+        }));
+        setLocationStatus('captured');
+      } else {
+        // Still save the address text even without coordinates
+        setFormData(prev => ({ ...prev, address: addr }));
+        setLocationStatus('captured');
       }
-    });
+    } catch (err) {
+      // Save address text without coordinates as fallback
+      setFormData(prev => ({ ...prev, address: addr }));
+      setLocationStatus('captured');
+    }
   };
 
   const categoryImages = {
@@ -243,6 +293,9 @@ export default function CreateListing() {
                   id="ai-image-input"
                   onChange={(e) => { if (e.target.files?.[0]) analyzeWithAI(e.target.files[0]); e.target.value = ''; }}
                 />
+                <label className="block font-black uppercase text-sm mb-2 italic flex items-center gap-2">
+                  <Sparkles size={14} className="text-purple-500" /> AI Smart Listing
+                </label>
                 <button
                   type="button"
                   onClick={() => aiFileInputRef.current?.click()}
@@ -266,15 +319,27 @@ export default function CreateListing() {
                   ) : aiSuccess ? (
                     <><Check size={16} /> Fields Auto-Filled!</>
                   ) : (
-                    <><Sparkles size={16} /> Auto-Fill with AI</>  
+                    <><Sparkles size={16} /> Generate Details with AI</>
                   )}
                 </button>
                 {aiError && (
-                  <p className="text-red-600 text-[10px] font-bold mt-1 italic">{aiError}</p>
+                  <div className="mt-2 p-3 bg-red-50 border-2 border-red-400 rounded-lg">
+                    <p className="text-red-700 text-[11px] font-bold leading-snug">{aiError}</p>
+                    {aiError.includes('API key') || aiError.includes('unavailable') || aiError.includes('not configured') ? (
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] font-black text-red-600 underline mt-1 block"
+                      >
+                        → Get a free API key at aistudio.google.com
+                      </a>
+                    ) : null}
+                  </div>
                 )}
                 {!aiError && (
                   <p className="text-[10px] font-bold text-gray-400 mt-1 italic">
-                    📸 Upload a photo — AI will fill in the title, description & price for you!
+                    📸 Upload a photo — AI fills in the title, description & price for you!
                   </p>
                 )}
               </div>
@@ -463,16 +528,97 @@ export default function CreateListing() {
                 <div className="mb-4">
                   <MapPin size={32} className="text-accent-teal" />
                 </div>
-                <h3 className="font-black uppercase mb-1">Set Location</h3>
-                <p className="text-[10px] font-bold text-gray-500 mb-4 italic">Auto-capture location for matching</p>
-                <button type="button" onClick={handleLocation} className={`btn-neo px-6 py-2 text-xs flex items-center gap-2 ${formData.lng !== 0 ? 'bg-accent-teal text-white' : 'bg-black text-white'}`}>
-                  {formData.lng !== 0 ? <><Check size={14} /> CAPTURED</> : 'CAPTURE GPS'}
-                </button>
+                <h3 className="font-black uppercase mb-1">Item Location</h3>
+                <p className="text-[10px] font-bold text-gray-500 mb-4 italic">
+                  Capture address for distance calculation
+                </p>
+
+                {/* GPS Button — not shown once manual mode is active */}
+                {locationStatus !== 'manual' && (
+                  <button
+                    type="button"
+                    onClick={handleLocation}
+                    disabled={locationStatus === 'loading'}
+                    className={`btn-neo px-6 py-2 text-xs flex items-center gap-2 mb-3 ${
+                      locationStatus === 'captured'
+                        ? 'bg-accent-teal text-white'
+                        : locationStatus === 'denied'
+                        ? 'bg-red-500 text-white'
+                        : locationStatus === 'loading'
+                        ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                        : 'bg-black text-white'
+                    }`}
+                  >
+                    {locationStatus === 'captured' && <><Check size={14} /> CAPTURED</>}
+                    {locationStatus === 'loading' && <><Loader2 size={14} className="animate-spin" /> DETECTING…</>}
+                    {locationStatus === 'denied' && <><AlertCircle size={14} /> GPS BLOCKED</>}
+                    {locationStatus === 'idle' && 'CAPTURE GPS'}
+                  </button>
+                )}
+
+                {/* Denied: show manual entry option */}
+                {locationStatus === 'denied' && locationStatus !== 'manual' && (
+                  <div className="w-full text-center mt-1">
+                    <p className="text-[10px] font-bold text-red-500 italic mb-2">
+                      Location access was denied. You can enter your address manually instead.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLocationStatus('manual')}
+                      className="btn-neo px-5 py-2 text-xs bg-white text-black flex items-center gap-2 mx-auto"
+                    >
+                      <Edit3 size={13} /> ENTER MANUALLY
+                    </button>
+                  </div>
+                )}
+
+                {/* Manual entry mode */}
+                {locationStatus === 'manual' && (
+                  <div className="w-full mt-1 space-y-2">
+                    <p className="text-[10px] font-bold text-gray-500 italic">Type your address or area:</p>
+                    <input
+                      type="text"
+                      value={manualAddress}
+                      onChange={(e) => setManualAddress(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleManualAddressGeocode())}
+                      placeholder="e.g. FAST NUCES Karachi, Block 5"
+                      className="input-neo w-full px-4 py-2 text-xs"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleManualAddressGeocode}
+                        disabled={!manualAddress.trim()}
+                        className="btn-neo flex-1 py-2 text-xs bg-accent-teal text-white disabled:opacity-50"
+                      >
+                        <Check size={13} className="inline mr-1" /> SAVE ADDRESS
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setLocationStatus('idle'); setManualAddress(''); }}
+                        className="btn-neo px-4 py-2 text-xs bg-white text-black"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Re-capture option after captured */}
+                {locationStatus === 'captured' && (
+                  <button
+                    type="button"
+                    onClick={() => { setLocationStatus('idle'); setManualAddress(''); setFormData(prev => ({ ...prev, lat: 0, lng: 0, address: '' })); }}
+                    className="text-[10px] font-bold text-gray-400 hover:text-gray-600 underline mt-1"
+                  >
+                    Change location
+                  </button>
+                )}
               </div>
 
               {formData.address && (
-                <div className="mt-4">
-                  <label className="block font-black uppercase text-[10px] mb-1 italic text-gray-500">Proper Address</label>
+                <div className="mt-2">
+                  <label className="block font-black uppercase text-[10px] mb-1 italic text-gray-500">Address</label>
                   <textarea
                     value={formData.address}
                     onChange={(e) => setFormData({...formData, address: e.target.value})}

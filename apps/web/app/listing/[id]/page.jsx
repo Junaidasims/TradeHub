@@ -8,7 +8,8 @@ import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { getSocket } from '@/lib/socket';
 import ListingCard from '@/components/ListingCard';
-import { ChevronLeft, MessageSquare, ShoppingBag, Calendar, Repeat, Eye, Star, Edit, Trash2, RotateCcw, Check, Share2, Heart, Shield, MapPin, Map, X } from 'lucide-react';
+import { useRazorpay } from '@/lib/useRazorpay';
+import { ChevronLeft, MessageSquare, ShoppingBag, Calendar, Repeat, Eye, Star, Edit, Trash2, RotateCcw, Check, Share2, Heart, Shield, MapPin, Map, X, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { calculateDistance, formatDistance } from '@/lib/geo';
 
 export default function ListingDetailPage() {
@@ -20,6 +21,12 @@ export default function ListingDetailPage() {
   const [selectedImg, setSelectedImg] = useState(0);
   const [related, setRelated] = useState([]);
   const [userLocation, setUserLocation] = useState(null);
+
+  // Razorpay hook
+  const { openPayment, loading: payLoading, error: payError, setError: setPayError } = useRazorpay();
+
+  // Payment success state
+  const [paySuccess, setPaySuccess] = useState(null); // { amount, purpose }
 
   useEffect(() => {
     if ("geolocation" in navigator) {
@@ -105,16 +112,29 @@ export default function ListingDetailPage() {
   const handleBuyConfirm = async () => {
     setBuyStep('processing');
     try {
-      await api.post(`/listings/${id}/interest`);
-      const convoId = await startConversation();
-      if (convoId) {
-        await api.post('/messages', {
-          conversationId: convoId,
-          text: `💰 I'd like to buy "${listing.title}". Let's finalize the deal!`,
-          itemContext: id
-        });
-      }
-      setBuyStep('messaging');
+      // Open Razorpay payment
+      openPayment({
+        listingId: id,
+        onSuccess: async (data) => {
+          setPaySuccess({ amount: data.amount, purpose: 'sell' });
+          setBuyStep('paid');
+          // Also open a conversation
+          const convoId = await startConversation();
+          if (convoId) {
+            await api.post('/messages', {
+              conversationId: convoId,
+              text: `💰 Payment of ₹${data.amount.toLocaleString()} confirmed! Ready to arrange pickup for "${listing.title}".`,
+              itemContext: id
+            });
+          }
+          setListing(prev => ({ ...prev, status: 'sold' }));
+        },
+        onFailure: (msg) => {
+          setBuyStep('confirm');
+        }
+      });
+      // Reset step immediately — Razorpay modal takes over
+      setBuyStep('confirm');
     } catch (err) {
       alert('Something went wrong');
       setShowBuyModal(false);
@@ -132,20 +152,36 @@ export default function ListingDetailPage() {
     if (!user) { router.push('/login'); return; }
     
     try {
-      await api.post('/rentals', { listingId: id });
-      const Price = listing.rentPrice || listing.price;
-      const successMsg = `Check notification and mark Yes\n\nI've submitted a rental request for "${listing.title}".`;
+      // Create rental record first to get the rentalId
+      const rentalRes = await api.post('/rentals', { listingId: id });
+      const rentalId = rentalRes.data._id;
+
       setShowRentModal(false);
-      const convoId = await startConversation();
-      if (convoId) {
-        await api.post('/messages', {
-          conversationId: convoId,
-          text: `📅 ${successMsg}`,
-          itemContext: id
-        });
-        router.push(`/messages?convo=${convoId}`);
-      }
-    } catch (err) { alert(err.response?.data?.msg || 'Failed'); }
+
+      // Open Razorpay for rental deposit payment
+      openPayment({
+        listingId: id,
+        rentalId,
+        onSuccess: async (data) => {
+          setPaySuccess({ amount: data.amount, purpose: 'rent' });
+          const convoId = await startConversation();
+          if (convoId) {
+            await api.post('/messages', {
+              conversationId: convoId,
+              text: `📅 Rental payment of ₹${data.amount.toLocaleString()} confirmed for "${listing.title}". Ready to arrange pickup!`,
+              itemContext: id
+            });
+            router.push(`/messages?convo=${convoId}`);
+          }
+        },
+        onFailure: (msg) => {
+          // Rental created but not paid — it will stay pending
+          alert(msg || 'Payment cancelled. Your rental request is pending but unpaid.');
+        }
+      });
+    } catch (err) {
+      alert(err.response?.data?.msg || 'Failed to create rental');
+    }
   };
 
   // === SELLER CONTROLS ===
@@ -515,51 +551,64 @@ export default function ListingDetailPage() {
 
       {/* ===== BUY MODAL ===== */}
       {showBuyModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-all duration-300" onClick={() => setShowBuyModal(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-all duration-300" onClick={() => !payLoading && setShowBuyModal(false)}>
           <div className="bg-white dark:bg-darkCard rounded-[2.5rem] p-10 w-full max-w-lg shadow-2xl relative" onClick={e => e.stopPropagation()}>
             {buyStep === 'confirm' && (
               <>
-                <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white mb-6">Confirm Interest</h2>
+                <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white mb-6">Buy This Item</h2>
                 <div className="flex items-center gap-5 mb-8 p-5 bg-gray-50 dark:bg-slate-800 rounded-3xl border border-gray-100 dark:border-darkBorder">
                   <img src={listing.images?.[0] || 'https://via.placeholder.com/150'} alt="" className="w-20 h-20 object-cover rounded-2xl shadow-sm" />
                   <div>
                     <p className="font-bold text-gray-900 dark:text-white mb-1">{listing.title}</p>
-                    <p className="text-accent-teal font-bold text-2xl">₹{listing.price.toLocaleString()}</p>
+                    <p className="text-gray-900 dark:text-white font-bold text-2xl">₹{listing.price.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400 mt-1">Sold by {listing.seller?.name}</p>
                   </div>
                 </div>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed font-medium">
-                  We will notify the seller and open a secure chat. You can coordinate the handoff and final payment safely on campus.
-                </p>
+
+                {payError && (
+                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-start gap-3 border border-red-100 dark:border-red-500/20">
+                    <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold text-red-600 dark:text-red-400">{payError}</p>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-500/10 rounded-2xl border border-blue-100 dark:border-blue-500/20 mb-8">
+                  <CreditCard size={18} className="text-blue-500 shrink-0" />
+                  <p className="text-xs font-bold text-blue-700 dark:text-blue-400">Secure payment via Razorpay — UPI, Cards, Net Banking accepted</p>
+                </div>
+
                 <div className="flex gap-4">
-                  <button onClick={() => setShowBuyModal(false)} className="flex-1 py-4 font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Cancel</button>
-                  <button onClick={handleBuyConfirm} className="flex-[2] bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-4 rounded-2xl font-bold shadow-xl hover:scale-[1.02] transition-all">
-                    Start Deal Now
+                  <button onClick={() => { setShowBuyModal(false); setPayError(''); }} className="flex-1 py-4 font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Cancel</button>
+                  <button
+                    onClick={handleBuyConfirm}
+                    disabled={payLoading}
+                    className="flex-[2] bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-4 rounded-2xl font-bold shadow-xl hover:scale-[1.02] transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                  >
+                    {payLoading ? <><Loader2 size={18} className="animate-spin" /> Processing…</> : <><CreditCard size={18} /> Pay ₹{listing.price.toLocaleString()}</>}
                   </button>
                 </div>
               </>
             )}
-            {buyStep === 'processing' && (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 border-4 border-accent-teal border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                <p className="font-bold text-gray-900 dark:text-white text-lg">Setting up your trade...</p>
-              </div>
-            )}
-            {buyStep === 'messaging' && (
+
+            {buyStep === 'paid' && paySuccess && (
               <div className="text-center">
                 <div className="w-20 h-20 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl">✓</div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Interest Notified!</h2>
-                <p className="text-gray-500 dark:text-gray-400 mb-8 font-medium">
-                  We've alerted the seller. Head over to your messages to finalize the time and place for pickup.
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Payment Successful!</h2>
+                <p className="text-gray-500 dark:text-gray-400 mb-2 font-medium">
+                  ₹{paySuccess.amount.toLocaleString()} paid successfully.
+                </p>
+                <p className="text-gray-400 dark:text-gray-500 text-sm mb-8">
+                  The seller has been notified. Go to messages to arrange pickup.
                 </p>
                 <div className="bg-yellow-50 dark:bg-yellow-500/5 p-4 rounded-2xl mb-8 text-left flex gap-3">
                   <Shield size={18} className="text-yellow-600 shrink-0" />
                   <p className="text-[11px] font-bold text-yellow-700 dark:text-yellow-500 leading-tight uppercase tracking-wide">
-                    Safety Tip: Inspect the item thoroughly before handing over any money.
+                    Safety Tip: Inspect the item thoroughly before completing the handoff.
                   </p>
                 </div>
                 <button onClick={handleGoToMessages}
                   className="w-full bg-accent-teal hover:bg-accent-teal/90 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-accent-teal/20">
-                  <MessageSquare size={20} /> Open Messages to Chat
+                  <MessageSquare size={20} /> Open Messages
                 </button>
               </div>
             )}
@@ -569,25 +618,36 @@ export default function ListingDetailPage() {
 
       {/* ===== RENT MODAL ===== */}
       {showRentModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-all duration-300" onClick={() => setShowRentModal(false)}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-all duration-300" onClick={() => !payLoading && setShowRentModal(false)}>
           <div className="bg-white dark:bg-darkCard rounded-[2.5rem] p-10 w-full max-w-lg shadow-2xl relative" onClick={e => e.stopPropagation()}>
             <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white mb-8 text-center">Rental Request</h2>
             
             <div className="bg-accent-teal/10 dark:bg-accent-teal/20 rounded-3xl p-10 text-center border border-accent-teal/20 mb-8">
-              <span className="text-[10px] font-bold text-accent-teal uppercase tracking-[0.2em] block mb-2">Request Amount</span>
+              <span className="text-[10px] font-bold text-accent-teal uppercase tracking-[0.2em] block mb-2">Rental Amount</span>
               <p className="text-5xl font-bold text-accent-teal">₹{(listing.rentPrice || listing.price).toLocaleString()}</p>
               <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase mt-2 tracking-widest">Base Duration: 24 Hours</p>
             </div>
-            
-            <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-6 mb-10 leading-relaxed font-medium">
-              The owner will receive a notification of your request. Once they approve, you'll be able to pick it up!
-            </p>
+
+            {payError && (
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-start gap-3 border border-red-100 dark:border-red-500/20">
+                <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                <p className="text-xs font-bold text-red-600 dark:text-red-400">{payError}</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-500/10 rounded-2xl border border-blue-100 dark:border-blue-500/20 mb-8">
+              <CreditCard size={18} className="text-blue-500 shrink-0" />
+              <p className="text-xs font-bold text-blue-700 dark:text-blue-400">Pay securely via Razorpay — UPI, Cards, Net Banking</p>
+            </div>
 
             <div className="flex gap-4">
-              <button onClick={() => setShowRentModal(false)} className="flex-1 py-4 font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Cancel</button>
-              <button onClick={handleRent}
-                className="flex-[2] bg-accent-teal hover:bg-accent-teal/90 text-white py-4 rounded-2xl font-bold shadow-xl shadow-accent-teal/20 transition-all hover:scale-[1.02]">
-                Submit Rental Request
+              <button onClick={() => { setShowRentModal(false); setPayError(''); }} className="flex-1 py-4 font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">Cancel</button>
+              <button
+                onClick={handleRent}
+                disabled={payLoading}
+                className="flex-[2] bg-accent-teal hover:bg-accent-teal/90 text-white py-4 rounded-2xl font-bold shadow-xl shadow-accent-teal/20 transition-all hover:scale-[1.02] disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {payLoading ? <><Loader2 size={18} className="animate-spin" /> Processing…</> : <><CreditCard size={18} /> Pay & Request Rental</>}
               </button>
             </div>
           </div>

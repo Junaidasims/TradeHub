@@ -4,7 +4,7 @@ import React from 'react';
 import { Tag, Star } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-export default function ItemCard({ id, name, category, condition, type, pricePerDay, ownerID, images }) {
+export default function ItemCard({ id, name, category, condition, type, pricePerDay, ownerID, images, currentState }) {
   const router = useRouter();
   const getConditionColor = (cond) => {
     switch (cond?.toLowerCase()) {
@@ -44,8 +44,8 @@ export default function ItemCard({ id, name, category, condition, type, pricePer
            <span className="px-3 py-1 border-2 border-black bg-white text-black text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
              {type}
            </span>
-           <span className={`px-3 py-1 border-2 border-black text-white text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${getStatusBadge(arguments[0].currentState)}`}>
-             {arguments[0].currentState}
+           <span className={`px-3 py-1 border-2 border-black text-white text-[10px] font-black uppercase shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ${getStatusBadge(currentState)}`}>
+             {currentState}
            </span>
         </div>
       </div>

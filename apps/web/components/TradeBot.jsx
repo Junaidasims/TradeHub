@@ -47,9 +47,15 @@ export default function TradeBot() {
 
       setMessages(prev => [...prev, { role: 'assistant', text: res.data.text }]);
     } catch (err) {
+      console.error('[TradeBot] Error:', err);
+      const errorMsg = err.response?.data?.msg 
+        || err.response?.data?.message 
+        || err.message 
+        || "Ouch! My brain had a hiccup. Can you try that again?";
+      
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        text: "Ouch! My brain had a hiccup. Can you try that again?" 
+        text: errorMsg
       }]);
     } finally {
       setIsLoading(false);

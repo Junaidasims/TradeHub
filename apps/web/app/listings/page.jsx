@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import Link from 'next/link';
@@ -13,7 +13,7 @@ const CATEGORIES = ['Electronics', 'Books', 'Furniture', 'Clothing', 'Sports', '
 const CONDITIONS = ['New', 'Like New', 'Good', 'Fair'];
 const TYPES = ['sell', 'rent', 'trade'];
 
-export default function ListingsPage() {
+function ListingsContent() {
   const searchParams = useSearchParams();
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -211,5 +211,18 @@ export default function ListingsPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function ListingsPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-cream dark:bg-darkBg transition-colors duration-200">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8 text-center font-bold">Loading listings...</div>
+      </main>
+    }>
+      <ListingsContent />
+    </Suspense>
   );
 }

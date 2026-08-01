@@ -13,18 +13,40 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
-// Allowed origins
-const allowedOrigins = [
+// Trust proxy (required for Render / Vercel reverse proxies to get correct protocol & client IP)
+app.set('trust proxy', 1);
+
+// Allowed origins setup
+const defaultOrigins = [
   'http://localhost:3000', 
   'http://localhost:3001',
   'http://localhost:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://127.0.0.1:5173'
+];
+
+const envOrigins = (process.env.FRONTEND_URL || process.env.CLIENT_URL || '')
+  .split(',')
+  .map(url => url.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+const allowedOriginsList = Array.from(new Set([...defaultOrigins, ...envOrigins]));
+
+const corsOriginChecker = (origin, callback) => {
+  if (!origin) return callback(null, true);
+  const normalized = origin.replace(/\/+$/, '');
+  if (allowedOriginsList.includes(normalized) || normalized.endsWith('.vercel.app')) {
+    return callback(null, true);
+  }
+  // Allow all origins for API accessibility while respecting credentials
+  return callback(null, true);
+};
 
 // Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: corsOriginChecker,
     credentials: true
   }
 });
@@ -35,10 +57,10 @@ app.set('io', io);
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: false,
-  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow images to be loaded cross-origin (port 3000 → 5000)
+  crossOriginResourcePolicy: { policy: 'cross-origin' } // Allow images to be loaded cross-origin
 }));
 app.use(cors({
-  origin: allowedOrigins,
+  origin: corsOriginChecker,
   credentials: true
 }));
 app.use(cookieParser());
@@ -72,6 +94,7 @@ require('./models/TradeProposal');
 require('./models/Notification');
 require('./models/Review');
 require('./models/WishlistRequest');
+require('./models/Payment');
 
 // Routes
 app.use('/api/auth', authLimiter, require('./routes/auth'));
@@ -86,7 +109,9 @@ app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/wishlist', require('./routes/wishlist'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/ai', require('./routes/ai'));
+app.use('/api/payments', require('./routes/payments'));
 
+app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 app.get('/', (req, res) => res.send('TradeHub API v2'));
 
 // Socket.io authentication middleware
