@@ -148,47 +148,6 @@ router.post('/write-description', auth, async (req, res) => {
   }
 });
 
-// POST /api/ai/trade-match
-// Body: { listingTitle, listingCategory, listingPrice, myItemTitle, myItemCategory }
-// Returns: { explanation }
-router.post('/trade-match', auth, async (req, res) => {
-  if (!process.env.GROQ_API_KEY) return res.status(503).json({ msg: 'AI not configured.' });
-
-  const { listingTitle, listingCategory, listingPrice, myItemTitle, myItemCategory } = req.body;
-  if (!listingTitle || !myItemTitle) return res.status(400).json({ msg: 'Both item titles are required.' });
-
-  try {
-    const completion = await groq().chat.completions.create({
-      model: 'qwen/qwen3.8-27b',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a trade fairness advisor for a campus marketplace. Be brief, honest, and practical. 2-3 sentences max. No emojis.'
-        },
-        {
-          role: 'user',
-          content: `Is this a fair trade on a campus?
-Listing: "${listingTitle}" (${listingCategory}, Rs.${listingPrice || 'unknown'})
-My item to offer: "${myItemTitle}" (${myItemCategory || 'unknown category'})
-
-Briefly explain if this trade makes sense and any tip to make it fairer.`
-        }
-      ],
-      temperature: 0.6,
-      max_tokens: 150,
-    });
-
-    const raw = completion.choices[0]?.message?.content || '';
-    const explanation = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-    return res.json({ explanation });
-  } catch (err) {
-    console.error('[AI] trade-match:', err.message);
-    if (isQuotaError(err.message)) return res.status(429).json({ msg: 'AI rate limited. Try again shortly.' });
-    return res.status(500).json({ msg: 'Failed to analyze trade.' });
-  }
-});
-
 // POST /api/ai/negotiate-tip
 // Body: { itemTitle, listedPrice, context } (context = last few chat messages)
 // Returns: { tip }
