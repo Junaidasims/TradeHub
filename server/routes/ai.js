@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const auth = require('../middleware/auth');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const Listing = require('../models/Listing');
 
 const upload = multer({
@@ -14,49 +14,32 @@ const upload = multer({
   limits: { fileSize: 8 * 1024 * 1024 }
 });
 
-// Model preference order — tries each until one works
-const MODEL_PREFERENCE = ['gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-2.0-flash'];
+// Get Groq client
+const getGroq = () => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('GROQ_API_KEY not set');
+  return new Groq({ apiKey });
+};
 
-// Helper: friendly error for key issues
-const isKeyError = (msg) =>
-  msg && (msg.includes('403') || msg.includes('API_KEY') || msg.includes('leaked') || msg.includes('Forbidden') || msg.includes('invalid') || msg.includes('expired'));
-
-// Helper: quota/rate limit error
+// Helper: check for quota/rate limit errors
 const isQuotaError = (msg) =>
-  msg && (msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests') || msg.includes('RESOURCE_EXHAUSTED'));
+  msg && (msg.includes('429') || msg.includes('quota') || msg.includes('rate_limit') || msg.includes('Too Many Requests'));
 
-// Helper: get a working Gemini model instance
-const getModel = (apiKey, modelName = MODEL_PREFERENCE[0]) => {
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: modelName });
-};
-
-// Helper: try generateContent with model fallback
-const generateWithFallback = async (apiKey, generateFn) => {
-  let lastErr;
-  for (const modelName of MODEL_PREFERENCE) {
-    try {
-      const model = getModel(apiKey, modelName);
-      return await generateFn(model);
-    } catch (err) {
-      lastErr = err;
-      // Don't fall back on auth errors — they'll fail on all models
-      if (isKeyError(err.message)) throw err;
-      // Log and try next model on quota, 404, or other transient errors
-      console.warn(`[AI] Model ${modelName} failed (${err.message?.substring(0, 80)}). Trying next...`);
-    }
-  }
-  throw lastErr;
-};
+// Helper: check for auth errors
+const isKeyError = (msg) =>
+  msg && (msg.includes('401') || msg.includes('403') || msg.includes('invalid_api_key') || msg.includes('Authentication'));
 
 // POST /api/ai/analyze-image
 router.post('/analyze-image', auth, upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ msg: 'No image file provided.' });
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'YOUR_KEY_HERE' || apiKey === 'YOUR_NEW_KEY_HERE') {
-    return res.status(503).json({ msg: 'AI is not configured. Add a valid GEMINI_API_KEY to server/.env and restart the server.' });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(503).json({ msg: 'AI is not configured. Add a valid GROQ_API_KEY to server/.env and restart the server.' });
   }
+
+  // Groq's vision model supports base64 images
+  const base64Image = req.file.buffer.toString('base64');
+  const dataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
 
   const prompt = `You are an expert marketplace seller. Carefully analyze this image of an item.
 Return ONLY a valid JSON object (no markdown, no code blocks, no extra text) with these exact fields:
@@ -68,19 +51,24 @@ Return ONLY a valid JSON object (no markdown, no code blocks, no extra text) wit
   "suggestedPrice": a number (integer) representing a reasonable price in Indian Rupees
 }`;
 
-  const imagePart = {
-    inlineData: {
-      data: req.file.buffer.toString('base64'),
-      mimeType: req.file.mimetype
-    }
-  };
-
   try {
-    const rawText = await generateWithFallback(apiKey, async (model) => {
-      const result = await model.generateContent([prompt, imagePart]);
-      return result.response.text();
+    const groq = getGroq();
+    const completion = await groq.chat.completions.create({
+      model: 'openai/gpt-oss-120b',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 500,
     });
 
+    const rawText = completion.choices[0]?.message?.content || '';
     const cleaned = rawText.replace(/```json|```/g, '').trim();
 
     let parsed;
@@ -102,10 +90,10 @@ Return ONLY a valid JSON object (no markdown, no code blocks, no extra text) wit
   } catch (err) {
     console.error('[AI] analyze-image error:', err.message || err);
     if (isKeyError(err.message)) {
-      return res.status(503).json({ msg: 'AI unavailable: The Gemini API key is invalid, expired, or leaked. Please generate a new key at https://aistudio.google.com/app/apikey and update GEMINI_API_KEY in server/.env, then restart.' });
+      return res.status(503).json({ msg: 'AI unavailable: The API key is invalid. Please check GROQ_API_KEY in your environment.' });
     }
     if (isQuotaError(err.message)) {
-      return res.status(429).json({ msg: 'AI quota exceeded for today. Free tier limit reached — try again tomorrow or upgrade your Gemini plan.' });
+      return res.status(429).json({ msg: 'AI quota exceeded. Free tier limit reached — try again in a minute.' });
     }
     return res.status(500).json({ msg: 'AI analysis failed. Please try again.' });
   }
@@ -113,9 +101,8 @@ Return ONLY a valid JSON object (no markdown, no code blocks, no extra text) wit
 
 // POST /api/ai/smart-replies
 router.post('/smart-replies', auth, async (req, res) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'YOUR_KEY_HERE' || apiKey === 'YOUR_NEW_KEY_HERE') {
-    return res.status(503).json({ msg: 'AI is not configured. Add a valid GEMINI_API_KEY to server/.env.' });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(503).json({ msg: 'AI is not configured. Add a valid GROQ_API_KEY to server/.env.' });
   }
 
   try {
@@ -126,19 +113,24 @@ router.post('/smart-replies', auth, async (req, res) => {
 
     const transcript = context.map(msg => `${msg.sender}: ${msg.text}`).join('\n');
 
-    const prompt = `You are a helpful smart reply generator for a marketplace chat application.
-Here is the recent chat history between 'Me' and 'Other':
-${transcript}
-
-Based on this conversation, generate 3 very short, natural, and polite replies that 'Me' could send next.
-Return ONLY a valid JSON array of strings (no markdown, no code blocks).
-Example: ["Yes, that works", "No, price is firm", "Can we do Rs.500?"]`;
-
-    const rawText = await generateWithFallback(apiKey, async (model) => {
-      const result = await model.generateContent(prompt);
-      return result.response.text();
+    const groq = getGroq();
+    const completion = await groq.chat.completions.create({
+      model: 'qwen/qwen3.8-27b',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a smart reply generator for a marketplace chat. Generate exactly 3 short, natural replies. Return ONLY a valid JSON array of strings, no markdown, no explanation, no thinking. Example: ["Yes, that works", "No, price is firm", "Can we do Rs.500?"]'
+        },
+        {
+          role: 'user',
+          content: `Chat history:\n${transcript}\n\nGenerate 3 short replies for "Me":`
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
     });
 
+    const rawText = completion.choices[0]?.message?.content || '';
     const cleaned = rawText.replace(/```json|```/g, '').trim();
 
     let parsed;
@@ -155,10 +147,10 @@ Example: ["Yes, that works", "No, price is firm", "Can we do Rs.500?"]`;
   } catch (err) {
     console.error('[AI] smart-replies error:', err.message || err);
     if (isKeyError(err.message)) {
-      return res.status(503).json({ msg: 'Smart replies unavailable: Invalid or expired API key.' });
+      return res.status(503).json({ msg: 'Smart replies unavailable: Invalid API key.' });
     }
     if (isQuotaError(err.message)) {
-      return res.status(429).json({ msg: 'AI quota exceeded. Try again tomorrow.' });
+      return res.status(429).json({ msg: 'AI quota exceeded. Try again in a moment.' });
     }
     return res.status(500).json({ msg: 'Failed to generate replies. Please try again.' });
   }
@@ -166,9 +158,8 @@ Example: ["Yes, that works", "No, price is firm", "Can we do Rs.500?"]`;
 
 // POST /api/ai/chat — TradeHub Buddy
 router.post('/chat', auth, async (req, res) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'YOUR_KEY_HERE' || apiKey === 'YOUR_NEW_KEY_HERE') {
-    return res.status(503).json({ msg: 'TradeBot is offline: AI is not configured. Add a valid GEMINI_API_KEY to server/.env.' });
+  if (!process.env.GROQ_API_KEY) {
+    return res.status(503).json({ msg: 'TradeBot is offline: AI is not configured. Add a valid GROQ_API_KEY to server/.env.' });
   }
 
   try {
@@ -197,32 +188,42 @@ RULES:
 - IMPORTANT: When mentioning an item, format it as: [Item Title](/listing/ITEM_ID)
 - If you don't find a specific item, suggest the closest category or tell them to check back later.
 - If they ask about platform features (renting, trading), explain them briefly.
-- Keep responses under 3-4 sentences unless absolutely necessary.
+- Keep responses under 3-4 sentences unless absolutely necessary.`;
 
-USER CONVERSATION HISTORY:
-${(history || []).map(h => {
-  try {
-    return `${h.role === 'user' ? 'Student' : 'Buddy'}: ${h.parts?.[0]?.text || ''}`;
-  } catch (e) {
-    return '';
-  }
-}).filter(Boolean).join('\n')}
-Student: ${message}
-Buddy:`;
+    // Build conversation history for Groq
+    const messages = [{ role: 'system', content: systemPrompt }];
 
-    const responseText = await generateWithFallback(apiKey, async (model) => {
-      const result = await model.generateContent(systemPrompt);
-      return result.response.text();
+    // Add previous turns from history
+    if (history && Array.isArray(history)) {
+      for (const h of history.slice(-6)) {
+        try {
+          const role = h.role === 'user' ? 'user' : 'assistant';
+          const text = h.parts?.[0]?.text || '';
+          if (text) messages.push({ role, content: text });
+        } catch (e) { /* skip malformed history entries */ }
+      }
+    }
+
+    // Add current user message
+    messages.push({ role: 'user', content: message });
+
+    const groq = getGroq();
+    const completion = await groq.chat.completions.create({
+      model: 'qwen/qwen3.8-27b',
+      messages,
+      temperature: 0.7,
+      max_tokens: 500,
     });
 
+    const responseText = completion.choices[0]?.message?.content || "Sorry, I couldn't generate a response. Try again!";
     return res.json({ text: responseText });
   } catch (err) {
     console.error('[TradeBot] Error:', err.message || err);
     if (isKeyError(err.message)) {
-      return res.status(503).json({ msg: 'TradeBot is offline: API key is invalid, expired, or leaked. Please update GEMINI_API_KEY in server/.env and restart.' });
+      return res.status(503).json({ msg: 'TradeBot is offline: API key is invalid. Please check GROQ_API_KEY in your environment.' });
     }
     if (isQuotaError(err.message)) {
-      return res.status(429).json({ msg: 'TradeBot hit its daily limit. Free tier quota reached — try again tomorrow!' });
+      return res.status(429).json({ msg: 'TradeBot hit its rate limit. Try again in a moment!' });
     }
     return res.status(500).json({ msg: 'TradeBot is resting right now. Try again later!' });
   }
