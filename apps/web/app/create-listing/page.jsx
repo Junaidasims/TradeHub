@@ -50,6 +50,7 @@ export default function CreateListing() {
       setDescLoading(false);
     }
   };
+  const categoryImages = {
     'Electronics': 'https://images.unsplash.com/photo-1498049794561-7780e7231661',
     'Books': 'https://images.unsplash.com/photo-1544640808-32ca72ac7f67',
     'Lab Equipment': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d',
