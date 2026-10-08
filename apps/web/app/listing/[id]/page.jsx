@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getSocket } from '@/lib/socket';
 import ListingCard from '@/components/ListingCard';
 import { useRazorpay } from '@/lib/useRazorpay';
-import { ChevronLeft, MessageSquare, ShoppingBag, Calendar, Repeat, Eye, Star, Edit, Trash2, RotateCcw, Check, Share2, Heart, Shield, MapPin, Map, X, CreditCard, Loader2, AlertCircle } from 'lucide-react';
+import { ChevronLeft, MessageSquare, ShoppingBag, Calendar, Repeat, Eye, Star, Edit, Trash2, RotateCcw, Check, Share2, Heart, Shield, MapPin, Map, X, CreditCard, Loader2, AlertCircle, Sparkles } from 'lucide-react';
 import { calculateDistance, formatDistance } from '@/lib/geo';
 
 export default function ListingDetailPage() {
@@ -22,8 +22,32 @@ export default function ListingDetailPage() {
   const [related, setRelated] = useState([]);
   const [userLocation, setUserLocation] = useState(null);
 
-  // Razorpay hook
-  const { openPayment, loading: payLoading, error: payError, setError: setPayError } = useRazorpay();
+  // Trade match state
+  const [tradeMatchOpen, setTradeMatchOpen] = useState(false);
+  const [tradeMyItem, setTradeMyItem] = useState('');
+  const [tradeMyCategory, setTradeMyCategory] = useState('');
+  const [tradeMatchResult, setTradeMatchResult] = useState('');
+  const [tradeMatchLoading, setTradeMatchLoading] = useState(false);
+
+  const handleTradeMatch = async () => {
+    if (!tradeMyItem.trim()) return;
+    setTradeMatchLoading(true);
+    setTradeMatchResult('');
+    try {
+      const res = await api.post('/ai/trade-match', {
+        listingTitle: listing.title,
+        listingCategory: listing.category,
+        listingPrice: listing.price,
+        myItemTitle: tradeMyItem,
+        myItemCategory: tradeMyCategory
+      });
+      setTradeMatchResult(res.data.explanation || '');
+    } catch {
+      setTradeMatchResult('Could not analyze this trade. Try again.');
+    } finally {
+      setTradeMatchLoading(false);
+    }
+  };
 
   // Payment success state
   const [paySuccess, setPaySuccess] = useState(null); // { amount, purpose }
@@ -470,6 +494,51 @@ export default function ListingDetailPage() {
                       <Repeat size={20} /> Propose an Exchange
                     </button>
                   )}
+
+                  {/* AI Trade Match */}
+                  {listing.type?.includes('trade') && (
+                    <div className="rounded-2xl border border-purple-100 dark:border-purple-500/20 overflow-hidden">
+                      <button
+                        onClick={() => { setTradeMatchOpen(o => !o); setTradeMatchResult(''); }}
+                        className="w-full flex items-center justify-between px-5 py-3 bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 font-bold text-sm hover:bg-purple-100 dark:hover:bg-purple-500/20 transition-colors"
+                      >
+                        <span className="flex items-center gap-2"><Sparkles size={15} /> Is my item a fair trade?</span>
+                        <span className="text-xs opacity-60">{tradeMatchOpen ? '▲' : '▼'}</span>
+                      </button>
+                      {tradeMatchOpen && (
+                        <div className="p-4 space-y-3 bg-white dark:bg-darkCard border-t border-purple-100 dark:border-purple-500/20">
+                          <input
+                            type="text"
+                            value={tradeMyItem}
+                            onChange={e => setTradeMyItem(e.target.value)}
+                            placeholder="What are you offering? (e.g. Calculus textbook)"
+                            className="input-neo w-full px-4 py-2.5 text-sm"
+                          />
+                          <input
+                            type="text"
+                            value={tradeMyCategory}
+                            onChange={e => setTradeMyCategory(e.target.value)}
+                            placeholder="Category (optional, e.g. Books)"
+                            className="input-neo w-full px-4 py-2.5 text-sm"
+                          />
+                          <button
+                            onClick={handleTradeMatch}
+                            disabled={tradeMatchLoading || !tradeMyItem.trim()}
+                            className="w-full py-2.5 text-sm font-bold text-white flex items-center justify-center gap-2 rounded-xl disabled:opacity-50 transition-all"
+                            style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow: tradeMatchLoading ? 'none' : '3px 3px 0 #000' }}
+                          >
+                            {tradeMatchLoading ? <><Loader2 size={14} className="animate-spin" /> Analyzing…</> : <><Sparkles size={14} /> Analyze Trade</>}
+                          </button>
+                          {tradeMatchResult && (
+                            <div className="p-3 bg-purple-50 dark:bg-purple-500/10 rounded-xl border border-purple-100 dark:border-purple-500/20 text-sm text-purple-900 dark:text-purple-200 font-medium leading-relaxed">
+                              {tradeMatchResult}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button onClick={handleMessage} className="w-full py-2 font-bold text-accent-teal hover:text-accent-teal/80 transition-colors flex items-center justify-center gap-2">
                     <MessageSquare size={18} /> Chat with {listing.seller?.name?.split(' ')[0]}
                   </button>

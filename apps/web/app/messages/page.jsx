@@ -46,6 +46,8 @@ function MessagesContent() {
   const [rentalDetails, setRentalDetails] = useState({}); // { rentalId: details }
   const [suggestedReplies, setSuggestedReplies] = useState([]);
   const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
+  const [negotiateTip, setNegotiateTip] = useState('');
+  const [negotiateLoading, setNegotiateLoading] = useState(false);
   const scrollRef = useRef(null);
   const typingTimeout = useRef(null);
   const activeConvoRef = useRef(null);
@@ -314,6 +316,30 @@ function MessagesContent() {
     }
   };
 
+  const handleNegotiateTip = async () => {
+    if (!activeConvo || !messages.length) return;
+    setNegotiateLoading(true);
+    setNegotiateTip('');
+    try {
+      const itemMsg = messages.find(m => m.itemContext);
+      const itemTitle = itemMsg?.itemContext?.title || activeConvo.lastMessage || 'this item';
+      const recentContext = messages.slice(-5).map(m => ({
+        sender: normalizeId(m.sender) === normalizeId(user) ? 'Me' : 'Other',
+        text: m.text
+      }));
+      const res = await api.post('/ai/negotiate-tip', {
+        itemTitle,
+        listedPrice: itemMsg?.itemContext?.price,
+        context: recentContext
+      });
+      setNegotiateTip(res.data.tip || '');
+    } catch {
+      setNegotiateTip('Could not generate a tip right now. Try again.');
+    } finally {
+      setNegotiateLoading(false);
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!newMsg.trim()) return;
@@ -576,15 +602,36 @@ function MessagesContent() {
                 <>
                   {/* Chat Header */}
                   <div className="px-6 py-4 border-b border-gray-100 dark:border-darkBorder bg-white dark:bg-darkCard flex items-center gap-4">
-                    <button onClick={() => setActiveConvo(null)} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300 transition-colors"><ArrowLeft size={20} /></button>
+                    <button onClick={() => { setActiveConvo(null); setNegotiateTip(''); }} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-300 transition-colors"><ArrowLeft size={20} /></button>
                     <div className="w-10 h-10 rounded-full bg-accent-teal/10 dark:bg-accent-teal/20 text-accent-teal dark:text-accent-teal flex items-center justify-center font-bold text-lg">
                       {getOtherUser(activeConvo)?.name?.charAt(0)}
                     </div>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="font-bold text-gray-800 dark:text-white">{getOtherUser(activeConvo)?.name}</p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">Online</p>
                     </div>
+                    <button
+                      onClick={handleNegotiateTip}
+                      disabled={negotiateLoading || messages.length === 0}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg border-2 border-orange-300 dark:border-orange-500/40 bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {negotiateLoading
+                        ? <><Sparkles size={12} className="animate-pulse" /> Thinking…</>
+                        : <><Sparkles size={12} /> Negotiate</>
+                      }
+                    </button>
                   </div>
+
+                  {/* Negotiate Tip Banner */}
+                  {negotiateTip && (
+                    <div className="mx-4 mt-3 px-4 py-3 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 flex items-start gap-3">
+                      <Sparkles size={14} className="text-orange-500 shrink-0 mt-0.5" />
+                      <p className="text-xs font-semibold text-orange-800 dark:text-orange-300 leading-relaxed flex-1">{negotiateTip}</p>
+                      <button onClick={() => setNegotiateTip('')} className="text-orange-400 hover:text-orange-600 transition-colors shrink-0">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Messages */}
                   <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/30 dark:bg-darkBg/30">

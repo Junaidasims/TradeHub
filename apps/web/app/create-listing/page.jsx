@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
-import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2, AlertCircle, Edit3 } from 'lucide-react';
+import { Camera, MapPin, Check, Upload, X, ImagePlus, Loader2, AlertCircle, Edit3, Sparkles } from 'lucide-react';
 
 export default function CreateListing() {
   const [formData, setFormData] = useState({
@@ -30,7 +30,26 @@ export default function CreateListing() {
   const [locationStatus, setLocationStatus] = useState('idle');
   const [manualAddress, setManualAddress] = useState('');
 
-  const categoryImages = {
+  const [descLoading, setDescLoading] = useState(false);
+
+  const writeDescriptionWithAI = async () => {
+    if (!formData.title || !formData.category) return;
+    setDescLoading(true);
+    try {
+      const res = await api.post('/ai/write-description', {
+        title: formData.title,
+        category: formData.category,
+        condition: formData.condition
+      });
+      if (res.data?.description) {
+        setFormData(prev => ({ ...prev, description: res.data.description }));
+      }
+    } catch {
+      // silently fail — user can still type manually
+    } finally {
+      setDescLoading(false);
+    }
+  };
     'Electronics': 'https://images.unsplash.com/photo-1498049794561-7780e7231661',
     'Books': 'https://images.unsplash.com/photo-1544640808-32ca72ac7f67',
     'Lab Equipment': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d',
@@ -173,13 +192,32 @@ export default function CreateListing() {
               </div>
 
               <div>
-                <label className="block font-black uppercase text-sm mb-2 italic">Description</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block font-black uppercase text-sm italic">Description</label>
+                  <button
+                    type="button"
+                    onClick={writeDescriptionWithAI}
+                    disabled={descLoading || !formData.title || !formData.category}
+                    className="flex items-center gap-1.5 text-[10px] font-black uppercase px-3 py-1.5 border-2 border-black transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{
+                      background: descLoading ? '#6366f1' : '#7c3aed',
+                      color: '#fff',
+                      boxShadow: descLoading ? '1px 1px 0 #000' : '3px 3px 0 #000',
+                      transform: descLoading ? 'translate(2px,2px)' : 'none'
+                    }}
+                  >
+                    {descLoading
+                      ? <><Loader2 size={11} className="animate-spin" /> Writing…</>
+                      : <><Sparkles size={11} /> Write with AI</>
+                    }
+                  </button>
+                </div>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="input-neo w-full px-4 py-3 resize-none"
                   rows={3}
-                  placeholder="Describe your item…"
+                  placeholder={!formData.title || !formData.category ? 'Fill in title & category first, then use AI ✦' : 'Describe your item…'}
                 />
               </div>
 
