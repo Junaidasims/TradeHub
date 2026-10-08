@@ -1,61 +1,64 @@
-# 🛒 TradeHub — Campus Marketplace Platform
+# TradeHub — Campus Marketplace Platform
 
-A full-stack peer-to-peer marketplace for college students to **buy, sell, rent, and trade** items with AI-powered features, real-time chat, and secure payments.
-
----
-
-## ✨ Features
-
-- **AI Smart Listing** — Upload a photo, AI auto-fills title, description, price (Google Gemini)
-- **Real-Time Messaging** — Socket.io chat with typing indicators + AI smart reply suggestions
-- **Secure Payments** — Razorpay integration with signature verification
-- **Location-Based** — GPS capture with geospatial proximity search
-- **TradeBot AI** — Chatbot to help find items on campus
-- **Transactions Page** — Track all payments sent and received
+A full-stack peer-to-peer marketplace for college students to buy, sell, rent, and trade items — with AI-powered features, real-time chat, and secure payments.
 
 ---
 
-## 🏗️ Tech Stack
+## Features
+
+- **AI Description Writer** — Fill in a title and category, AI writes the listing description for you
+- **AI Smart Replies** — After receiving a message, AI suggests 3 quick replies based on the conversation
+- **AI Negotiation Coach** — While chatting, get a one-tap negotiation tip as a buyer
+- **TradeBot** — Chatbot that searches active listings and helps students find items
+- **Real-Time Messaging** — Socket.io chat with typing indicators
+- **Secure Payments** — Razorpay integration (UPI, Cards, Net Banking)
+- **Location-Based Search** — GPS capture with proximity display ("2 km away")
+- **Rental System** — Rent items for a period with payment and approval flow
+- **Wishlist & Trade Requests** — Request items or propose exchanges
+
+---
+
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | Next.js 14 (App Router), React, TailwindCSS |
-| **Backend** | Node.js, Express.js, Socket.io |
-| **Database** | MongoDB (Mongoose) |
-| **Payments** | Razorpay |
-| **AI** | Google Gemini 2.5 Flash |
-| **Auth** | JWT (httpOnly cookies + localStorage) |
+| Frontend | Next.js 14 (App Router), React, TailwindCSS |
+| Backend | Node.js, Express.js, Socket.io |
+| Database | MongoDB (Mongoose) |
+| Payments | Razorpay |
+| AI | Groq API (qwen/qwen3.8-27b) |
+| Auth | JWT (httpOnly cookies + localStorage) |
+| Deployment | Vercel (frontend) + Render (backend) |
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 Tradehub/
 ├── apps/web/               # Next.js frontend (Port 3000)
 │   ├── app/               # Pages (App Router)
-│   ├── components/        # Reusable components
+│   ├── components/        # Reusable components (Navbar, TradeBot, etc.)
 │   ├── context/           # Auth & Theme context
 │   └── lib/               # API client, Socket, Razorpay hook
 │
 └── server/                # Express backend (Port 5000)
     ├── models/            # Mongoose schemas
     ├── routes/            # API endpoints
-    ├── middleware/        # JWT auth
-    └── uploads/           # User-uploaded images
+    └── middleware/        # JWT auth
 ```
 
 ---
 
-## 🚀 Local Development
+## Local Development
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 18+
 - MongoDB Atlas account
 - Razorpay account (Test Mode)
-- Google Gemini API key
+- Groq API key (free at [console.groq.com](https://console.groq.com))
 
-### 1️⃣ Backend Setup
+### Backend
 
 ```bash
 cd server
@@ -67,7 +70,7 @@ Create `server/.env`:
 PORT=5000
 MONGO_URI=your_mongodb_atlas_connection_string
 JWT_SECRET=your_jwt_secret_key
-GEMINI_API_KEY=your_gemini_api_key
+GROQ_API_KEY=gsk_your_groq_key
 RAZORPAY_KEY_ID=rzp_test_xxxxx
 RAZORPAY_KEY_SECRET=xxxxx
 CLIENT_URL=http://localhost:3000
@@ -78,7 +81,7 @@ BACKEND_URL=http://localhost:5000
 npm run dev
 ```
 
-### 2️⃣ Frontend Setup
+### Frontend
 
 ```bash
 cd apps/web
@@ -98,221 +101,128 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 📤 Deployment Guide
+## Deployment
 
-### **MongoDB Atlas**
+### MongoDB Atlas
 1. Go to [mongodb.com/cloud/atlas](https://mongodb.com/cloud/atlas)
-2. Create cluster → Get connection string
-3. Whitelist all IPs: `0.0.0.0/0`
+2. Create cluster → get connection string
+3. Network Access → Add `0.0.0.0/0`
 
-### **Backend (Render)**
-1. Go to [render.com](https://render.com) → New Web Service
-2. Connect GitHub repo
-3. **Settings:**
-   - Root Directory: `server`
-   - Build Command: `npm install`
-   - Start Command: `npm start`
-4. **Environment Variables** (copy from `server/.env.example`):
-   ```
-   MONGO_URI=mongodb+srv://...
-   JWT_SECRET=...
-   GEMINI_API_KEY=...
-   RAZORPAY_KEY_ID=...
-   RAZORPAY_KEY_SECRET=...
-   FRONTEND_URL=https://your-app.vercel.app
-   BACKEND_URL=https://your-service.onrender.com
-   ```
-5. Deploy → Copy the Render URL
+### Backend — Render
+1. New Web Service → connect GitHub repo
+2. Root Directory: `server` | Build: `npm install` | Start: `npm start`
+3. Environment Variables:
+```
+MONGO_URI=mongodb+srv://...
+JWT_SECRET=...
+GROQ_API_KEY=gsk_...
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
+FRONTEND_URL=https://your-app.vercel.app
+BACKEND_URL=https://your-service.onrender.com
+```
 
-### **Frontend (Vercel)**
-1. Go to [vercel.com](https://vercel.com) → New Project
-2. Connect GitHub repo
-3. **Settings:**
-   - Root Directory: `apps/web`
-   - Framework: Next.js
-4. **Environment Variable:**
-   ```
-   NEXT_PUBLIC_API_URL=https://your-service.onrender.com/api
-   ```
-5. Deploy → Copy the Vercel URL
-6. Go back to Render → Update `FRONTEND_URL` to your Vercel URL
+### Frontend — Vercel
+1. New Project → connect GitHub repo
+2. Root Directory: `apps/web` | Framework: Next.js
+3. Environment Variable:
+```
+NEXT_PUBLIC_API_URL=https://your-service.onrender.com/api
+```
 
 ---
 
-## 🔑 Getting API Keys
+## API Keys
 
-**Google Gemini:**
-- Go to [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-- Generate API Key (free tier: 15 requests/min)
+**Groq (free, no credit card):**
+- Sign up at [console.groq.com](https://console.groq.com)
+- Create API Keys → copy the key (starts with `gsk_`)
 
 **Razorpay:**
-- Go to [dashboard.razorpay.com](https://dashboard.razorpay.com)
-- Switch to **Test Mode**
+- Go to [dashboard.razorpay.com](https://dashboard.razorpay.com) → Test Mode
 - Settings → API Keys → Generate Test Key
-- For production: Complete KYC and switch to Live Mode
 
 ---
 
-## 🧪 Testing Payments
-
-In Test Mode, use these credentials:
+## Testing Payments
 
 | Method | Details |
 |---|---|
-| **Card** | `4718 6000 0000 0002` · Expiry: `12/26` · CVV: `123` · OTP: `1234` |
-| **Net Banking** | Select any bank → Click "Success" |
+| Card | `4718 6000 0000 0002` · Expiry: `12/26` · CVV: `123` · OTP: `1234` |
+| Net Banking | Select any bank → Click "Success" |
 
 ---
 
-## 📋 Git Commands
+## Testing AI Features
 
-```bash
-cd "c:\Users\JUNAID ASIM\Desktop\Tradehub\Tradehub"
+**AI Description Writer** (`/create` or `/create-listing`)
+1. Fill in the title (e.g. "HP Laptop i5") and select a category
+2. Click "Generate Details with AI"
+3. Description auto-fills in the textarea
 
-# Check status
-git status
+**AI Smart Replies** (Messages page)
+1. Open any conversation where the other person sent the last message
+2. 3 reply suggestions appear above the input box automatically
+3. Click one to fill it into the input
 
-# Add all changes
-git add .
+**AI Negotiation Coach** (Messages page)
+1. Open any conversation with some messages
+2. Click the "Negotiate" button in the chat header
+3. An orange tip banner appears with one actionable advice
 
-# Commit
-git commit -m "Add payment integration and AI features"
+**TradeBot** (floating button, bottom-right, logged in users only)
+1. Click the bot icon → type "Do you have any laptops?"
+2. Bot searches active listings and responds with links
 
-# Push to your GitHub
-git push origin main
+---
+
+## API Endpoints
+
+```
+Auth        POST /api/auth/register, /login  |  GET /api/auth/me
+Listings    GET/POST /api/listings  |  GET/PATCH/DELETE /api/listings/:id
+AI          POST /api/ai/chat, /smart-replies, /write-description, /negotiate-tip
+Payments    POST /api/payments/create-order, /verify  |  GET /api/payments/my
+Messages    GET /api/conversations  |  POST /api/messages
+Upload      POST /api/upload
 ```
 
-If you haven't initialized git yet:
-```bash
-git init
-git add .
-git commit -m "Initial commit - TradeHub marketplace"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/tradehub.git
-git push -u origin main
-```
-
 ---
 
-## 🎯 Core Features Explained
-
-### 1. **AI Smart Listing**
-Upload an item photo → AI analyzes it → Auto-fills title, description, category, condition, and price
-
-### 2. **Real-Time Chat**
-Socket.io powers instant messaging with typing indicators. AI suggests 3 smart replies based on conversation context.
-
-### 3. **Payments (Razorpay)**
-Buyer pays → Backend verifies signature → Listing marked sold → Seller gets notification → Both see transaction history
-
-### 4. **Location Search**
-GPS capture with manual fallback → Geospatial queries show "X km away" → Listings sorted by proximity
-
-### 5. **TradeBot**
-AI chatbot that searches active listings and helps users find items with clickable links
-
----
-
-## 📊 Database Models
+## Database Models
 
 - **User** — name, email, password (bcrypt), college, rating
-- **Listing** — title, price, images, location (GeoJSON), status, seller ref
-- **Conversation** — participants, lastMessage, unreadCount (Map)
-- **Message** — sender, text, conversation ref, itemContext
+- **Listing** — title, price, images, location (GeoJSON), status, type, seller
+- **Conversation** — participants, lastMessage, unreadCount
+- **Message** — sender, text, conversation, itemContext
 - **Payment** — buyer, seller, razorpayOrderId, amount, status
-- **Rental** — listing, renter, owner, dates, status
+- **Rental** — listing, renter, owner, dates, totalCost, status
 - **Notification** — recipient, type, message, link
 
 ---
 
-## 🛡️ Security Features
+## Security
 
 - Passwords hashed with bcrypt (10 rounds)
-- JWT tokens with httpOnly cookies
-- CORS restricted to Vercel/local origins
+- JWT tokens verified on every protected route
+- CORS restricted to known frontend origins
 - Razorpay signature verification (HMAC-SHA256)
-- Rate limiting on auth routes (30 req/15min)
-- Input validation on all routes
+- Rate limiting on auth routes (30 req / 15 min)
 
 ---
 
-## 📝 Environment Variables Reference
+## Troubleshooting
 
-### Backend (`server/.env`)
-```env
-PORT=5000
-NODE_ENV=production
-MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/tradehub
-JWT_SECRET=your_secret_key
-BCRYPT_SALT_ROUNDS=10
-FRONTEND_URL=https://tradehub.vercel.app
-BACKEND_URL=https://tradehub-api.onrender.com
-GEMINI_API_KEY=your_gemini_key
-RAZORPAY_KEY_ID=rzp_test_xxxxx
-RAZORPAY_KEY_SECRET=xxxxx
-```
+**AI not working** — Check `GROQ_API_KEY` in Render environment variables. Key must start with `gsk_`.
 
-### Frontend (`apps/web/.env.local`)
-```env
-NEXT_PUBLIC_API_URL=https://tradehub-api.onrender.com/api
-```
+**Payment failing** — Use test card `4718 6000 0000 0002`. Ensure `RAZORPAY_KEY_ID` starts with `rzp_test_`.
+
+**Socket.io not connecting** — Verify `NEXT_PUBLIC_API_URL` in Vercel environment variables points to your Render URL.
+
+**MongoDB not connecting locally** — Your ISP may block SRV DNS lookups. Use a mobile hotspot or change DNS to `8.8.8.8`. The live deployment on Render is unaffected.
 
 ---
 
-## 🐛 Troubleshooting
+## License
 
-**"AI analysis failed"**
-- Check `GEMINI_API_KEY` in server `.env`
-- Verify key starts with `AIza` (not `AQ.`)
-- Check quota at [aistudio.google.com](https://aistudio.google.com)
-
-**"Payment not working"**
-- Ensure `RAZORPAY_KEY_ID` starts with `rzp_test_`
-- Use test card: `4718 6000 0000 0002`
-- Enable international cards in Razorpay dashboard if using `4111 1111 1111 1111`
-
-**"Socket.io not connecting"**
-- Check `NEXT_PUBLIC_API_URL` in frontend `.env.local`
-- Ensure backend CORS allows frontend URL
-- Verify JWT token in localStorage
-
-**"Images not loading after deployment"**
-- Set `BACKEND_URL` in Render environment variables
-- Check `next.config.mjs` has correct `remotePatterns`
-
----
-
-## 📚 API Endpoints
-
-**Auth:** `POST /api/auth/register`, `/login`, `GET /me`  
-**Listings:** `GET /api/listings`, `POST /`, `GET /:id`, `PATCH /:id`  
-**Payments:** `POST /api/payments/create-order`, `/verify`, `GET /my`  
-**AI:** `POST /api/ai/analyze-image`, `/chat`, `/smart-replies`  
-**Messages:** `GET /api/conversations`, `POST /api/messages`  
-**Upload:** `POST /api/upload`, `/upload/multiple`  
-
----
-
-## 👥 Team / Author
-
-**Your Name** — Full Stack Developer  
-GitHub: [@YOUR_USERNAME](https://github.com/YOUR_USERNAME)
-
----
-
-## 📄 License
-
-MIT License - Feel free to use this project for learning or your own campus marketplace.
-
----
-
-## 🙏 Acknowledgments
-
-- Google Gemini for AI features
-- Razorpay for payment infrastructure
-- MongoDB Atlas for database hosting
-- Vercel & Render for deployment
-
----
-
-**Built with ❤️ for campus communities**
+MIT — free to use for learning or building your own campus marketplace.
