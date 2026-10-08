@@ -29,69 +29,28 @@ export default function CreateListingPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuccess, setAiSuccess] = useState(false);
   const [aiError, setAiError] = useState('');
-  const aiFileInputRef = useRef(null);
 
-  const analyzeWithAI = async (file) => {
-    if (!file) return;
+  const generateWithAI = async () => {
+    if (!form.title || !form.category) {
+      setAiError('Please fill in the title and category first.');
+      return;
+    }
     setAiLoading(true);
     setAiError('');
     setAiSuccess(false);
-
-    // Add the image to the upload zone as a preview in parallel
-    const preview = URL.createObjectURL(file);
-    const startIndex = uploadedImages.length;
-    if (uploadedImages.length < 5) {
-      setUploadedImages(prev => [...prev, { preview, url: null, uploading: true, error: null }]);
-      const data = new FormData();
-      data.append('image', file);
-      api.post('/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } })
-        .then(res => {
-          setUploadedImages(prev => {
-            const updated = [...prev];
-            updated[startIndex] = { ...updated[startIndex], url: res.data.url, uploading: false, error: null };
-            return updated;
-          });
-        })
-        .catch(() => {
-          setUploadedImages(prev => {
-            const updated = [...prev];
-            updated[startIndex] = { ...updated[startIndex], uploading: false, error: 'Upload failed' };
-            return updated;
-          });
-        });
-    }
-
-    // Send to AI for analysis
     try {
-      const formPayload = new FormData();
-      formPayload.append('image', file);
-      const res = await api.post('/ai/analyze-image', formPayload, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const res = await api.post('/ai/write-description', {
+        title: form.title,
+        category: form.category,
+        condition: form.condition
       });
-      const { title, description, category, condition, suggestedPrice } = res.data;
-      
-      const conditionMap = {
-        'new': 'New',
-        'like new': 'Like New',
-        'good': 'Good',
-        'fair': 'Fair',
-        'poor': 'Fair'
-      };
-      const normalizedCondition = conditionMap[condition?.toLowerCase()] || 'Good';
-
-      setForm(prev => ({
-        ...prev,
-        title: title || prev.title,
-        description: description || prev.description,
-        category: category || prev.category,
-        condition: normalizedCondition,
-        price: suggestedPrice || prev.price,
-        rentPrice: suggestedPrice || prev.rentPrice
-      }));
-      setAiSuccess(true);
-      setTimeout(() => setAiSuccess(false), 4000);
+      if (res.data?.description) {
+        setForm(prev => ({ ...prev, description: res.data.description }));
+        setAiSuccess(true);
+        setTimeout(() => setAiSuccess(false), 4000);
+      }
     } catch (err) {
-      setAiError(err.response?.data?.msg || 'AI analysis failed. Please try again.');
+      setAiError(err.response?.data?.msg || 'AI failed. Try again.');
     } finally {
       setAiLoading(false);
     }
@@ -229,24 +188,17 @@ export default function CreateListingPage() {
               </div>
               <div className="flex-1 text-center md:text-left">
                 <h2 className="text-xl font-bold text-white mb-1">AI Smart Listing</h2>
-                <p className="text-indigo-100 text-sm font-medium mb-4">Upload a photo and let our AI fill in the details for you!</p>
-                <input
-                  ref={aiFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => { if (e.target.files?.[0]) analyzeWithAI(e.target.files[0]); e.target.value = ''; }}
-                />
+                <p className="text-indigo-100 text-sm font-medium mb-4">Fill in your title and category, then let AI write the description for you!</p>
                 <button
                   type="button"
-                  onClick={() => aiFileInputRef.current?.click()}
-                  disabled={aiLoading}
+                  onClick={generateWithAI}
+                  disabled={aiLoading || !form.title || !form.category}
                   className="px-8 py-3 bg-white text-indigo-600 rounded-2xl font-bold text-sm shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-100 transition-all disabled:opacity-50 flex items-center gap-2 mx-auto md:mx-0"
                 >
                   {aiLoading ? (
-                    <><Loader2 size={18} className="animate-spin" /> Analyzing Image...</>
+                    <><Loader2 size={18} className="animate-spin" /> Writing Description...</>
                   ) : aiSuccess ? (
-                    <><Check size={18} /> Details Generated!</>
+                    <><Check size={18} /> Description Generated!</>
                   ) : (
                     <>Generate Details with AI</>
                   )}
